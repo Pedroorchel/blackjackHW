@@ -198,7 +198,10 @@ export const Lobby: React.FC<LobbyProps> = ({
     setIsGoogleLoading(true);
 
     try {
-      const redirectUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+      let redirectUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0].split('?')[0] : undefined;
+      if (redirectUrl && !redirectUrl.endsWith('/')) {
+        redirectUrl += '/';
+      }
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
