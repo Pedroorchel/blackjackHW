@@ -722,10 +722,10 @@ export default function App() {
         if (!resolved) {
           resolved = true;
           isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl);
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
           setIsConnecting(false);
         }
-      }, 1500);
+      }, 8000);
 
       socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
         if (resolved) return;
@@ -737,12 +737,12 @@ export default function App() {
         } else {
           // Fallback to local table if server rejected or errored
           isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl);
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
         }
       });
     } else {
       isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl);
+      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
       setIsConnecting(false);
     }
   };
@@ -813,7 +813,7 @@ export default function App() {
           localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId);
           setIsConnecting(false);
         }
-      }, 1500);
+      }, 8000);
 
       socket.emit('room:join', { roomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
         if (resolved) return;

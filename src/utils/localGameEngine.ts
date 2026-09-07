@@ -78,7 +78,7 @@ export class LocalGameEngine {
     chips: number = 1000, 
     avatarUrl?: string, 
     customRoomId?: string,
-    initialBotsCount: number = 3
+    initialBotsCount: number = 0
   ): string {
     this.roomId = customRoomId || ('MESA-' + Math.floor(100 + Math.random() * 900));
     this.hostId = 'local-player';
@@ -88,7 +88,7 @@ export class LocalGameEngine {
       {
         id: 'msg-welcome',
         senderName: 'Dealer VIP',
-        text: `Bem-vindo à Mesa VIP ${this.roomId}! Faça suas apostas contra a mesa e os bots convidados.`,
+        text: `Bem-vindo à Mesa VIP ${this.roomId}! Você pode convidar amigos enviando o código da sala ou adicionar bots para jogar.`,
         timestamp: Date.now(),
       }
     ];
