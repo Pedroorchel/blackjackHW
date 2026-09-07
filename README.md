@@ -23,10 +23,15 @@ chmod +x start.sh
 
 ## 🌐 Publicação no GitHub Pages (Sem Tela Branca)
 
-O projeto já inclui:
-1. **`base: './'` no Vite**: Os caminhos de script e estilos são relativos, evitando o erro 404 de tela branca no GitHub Pages (`username.github.io/repo/`).
-2. **GitHub Actions Automático**: O arquivo `.github/workflows/deploy.yml` compila e publica o projeto automaticamente a cada `git push` no branch `main`.
-3. Para ativar no GitHub:
-   - Vá em **Settings** > **Pages** do repositório.
-   - Em **Build and deployment > Source**, selecione **GitHub Actions**.
-   - O GitHub irá instalar os pacotes, compilar e publicar o site automaticamente!
+O projeto está configurado para funcionar **em qualquer modo do GitHub Pages**:
+
+### Opção 1: GitHub Actions (Automático - Recomendado)
+1. No seu repositório no GitHub, clique em **Settings** (Configurações).
+2. No menu lateral esquerdo, clique em **Pages**.
+3. Em **Build and deployment > Source**, selecione **GitHub Actions**.
+4. Pronto! A cada push, o GitHub instala os pacotes, compila o projeto e publica o site automaticamente sem tela branca.
+
+### Opção 2: Deploy direto pelo Branch (Caso não use GitHub Actions)
+1. Em **Settings** > **Pages**, deixe **Deploy from a branch**.
+2. No campo **Branch**, escolha **main** (ou **master**).
+3. Na pasta, escolha **/docs** ou **/ (root)** — ambos já contêm a versão compilada pronta (`dist` e `docs`), garantindo que não haverá tela branca.

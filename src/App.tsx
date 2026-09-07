@@ -72,8 +72,13 @@ export default function App() {
     timestamp: number;
   }[]>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('blackjack_hand_history');
-      return saved ? JSON.parse(saved) : [];
+      try {
+        const saved = localStorage.getItem('blackjack_hand_history');
+        return saved ? JSON.parse(saved) : [];
+      } catch (err) {
+        console.warn('Failed to parse blackjack_hand_history:', err);
+        return [];
+      }
     }
     return [];
   });
@@ -86,8 +91,13 @@ export default function App() {
     timestamp: number;
   }[]>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('blackjack_bankroll_history');
-      return saved ? JSON.parse(saved) : [];
+      try {
+        const saved = localStorage.getItem('blackjack_bankroll_history');
+        return saved ? JSON.parse(saved) : [];
+      } catch (err) {
+        console.warn('Failed to parse blackjack_bankroll_history:', err);
+        return [];
+      }
     }
     return [];
   });
@@ -239,6 +249,10 @@ export default function App() {
 
     socket.on('connect', () => {
       // connected
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('Socket connection note (server offline or static mode):', err?.message || err);
     });
 
     socket.on('room:state', (state: RoomState) => {
