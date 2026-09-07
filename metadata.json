@@ -1,0 +1,6 @@
+{
+  "name": "Blackjack Multiplayer",
+  "description": "Jogo de Blackjack (21) multiplayer em tempo real com salas privadas, cartas abertas na mesa, dealer e sistema de turnos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

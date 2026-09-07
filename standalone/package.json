@@ -1,0 +1,13 @@
+{
+  "name": "blackjack-multiplayer-vanilla",
+  "version": "1.0.0",
+  "description": "Blackjack multiplayer em tempo real com Node.js, Express e Socket.io",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.3"
+  }
+}

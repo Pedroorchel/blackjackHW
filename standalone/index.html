@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blackjack Multiplayer (21)</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <!-- LOBBY SCREEN -->
+  <div id="lobby-screen" class="screen active">
+    <div class="lobby-card">
+      <div class="card-suits">♠ <span class="red">♥</span> <span class="red">♦</span> ♣</div>
+      <h1>BLACKJACK</h1>
+      <p class="subtitle">Multiplayer em Tempo Real (2 a 6 jogadores)</p>
+
+      <div class="form-group">
+        <label for="input-name">Seu Nome de Exibição:</label>
+        <input type="text" id="input-name" placeholder="Digite seu nome" maxlength="16" value="Jogador 1">
+      </div>
+
+      <button id="btn-create-room" class="btn btn-gold">Criar Sala Privada</button>
+
+      <div class="divider"><span>ou entrar em sala</span></div>
+
+      <div class="form-group join-row">
+        <input type="text" id="input-room-code" placeholder="Código (ex: A9K2L1)" maxlength="6">
+        <button id="btn-join-room" class="btn btn-green">Entrar</button>
+      </div>
+
+      <p id="lobby-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- GAME TABLE SCREEN -->
+  <div id="game-screen" class="screen">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="bar-left">
+        <span class="logo">21 BLACKJACK</span>
+        <div class="room-pill">
+          <span>Sala: <strong id="display-room-code">------</strong></span>
+          <button id="btn-copy-code" title="Copiar Código">📋</button>
+        </div>
+      </div>
+      <div class="bar-right">
+        <span id="display-round" class="round-badge">Rodada #1</span>
+        <button id="btn-leave" class="btn-leave">Sair da Mesa</button>
+      </div>
+    </header>
+
+    <!-- Casino Felt Table -->
+    <main class="table-container">
+      <div class="felt-table">
+        <!-- Dealer Area -->
+        <div class="dealer-section">
+          <div class="dealer-badge">Mesa (Dealer)</div>
+          <div class="table-arch">Blackjack paga 3 a 2 • Dealer para em todos os 17</div>
+          <div id="dealer-cards" class="cards-row"></div>
+          <div id="dealer-score" class="score-pill">Total: 0</div>
+        </div>
+
+        <!-- Center Ring -->
+        <div class="center-ring">CASINO ROYALE</div>
+
+        <!-- Players Grid -->
+        <div id="players-container" class="players-grid"></div>
+      </div>
+    </main>
+
+    <!-- Bottom Controls -->
+    <footer class="bottom-controls">
+      <!-- Betting Phase -->
+      <div id="betting-controls" class="controls-panel">
+        <div class="bet-info">
+          <span>Sua Aposta: <strong id="current-bet-display">$25</strong></span>
+        </div>
+        <div class="chips-row">
+          <button class="chip chip-10" data-amount="10">$10</button>
+          <button class="chip chip-25" data-amount="25">$25</button>
+          <button class="chip chip-50" data-amount="50">$50</button>
+          <button class="chip chip-100" data-amount="100">$100</button>
+          <button class="chip chip-500" data-amount="500">$500</button>
+        </div>
+        <div class="action-buttons">
+          <button id="btn-ready" class="btn btn-gold">Confirmar Aposta</button>
+          <button id="btn-start" class="btn btn-green host-only">Distribuir Cartas</button>
+        </div>
+      </div>
+
+      <!-- Player Turns Phase -->
+      <div id="turn-controls" class="controls-panel hidden">
+        <div id="turn-status-banner" class="status-banner">Sua vez de jogar!</div>
+        <div class="action-buttons">
+          <button id="btn-hit" class="btn btn-green">Pedir Carta (Hit)</button>
+          <button id="btn-stand" class="btn btn-red">Parar (Stand)</button>
+          <button id="btn-double" class="btn btn-blue">Dobrar (Double)</button>
+        </div>
+      </div>
+
+      <!-- Round Over Phase -->
+      <div id="round-over-controls" class="controls-panel hidden">
+        <div id="round-summary-text" class="status-banner">Rodada finalizada!</div>
+        <button id="btn-new-round" class="btn btn-gold">Nova Rodada</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
