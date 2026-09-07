@@ -50,6 +50,8 @@ export interface Player {
   debts: Record<string, number>; // Tracks how much is owed to other players (key: lenderId, value: amount)
   wins: number;
   avatarUrl?: string;
+  isBot?: boolean;
+  botPersonality?: string;
 }
 
 export interface Dealer {

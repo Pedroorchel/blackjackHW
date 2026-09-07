@@ -202,6 +202,19 @@ export function persistPlaytime(totalSeconds: number, sessionSeconds: number, us
       localStorage.setItem(todayDateKey, todayStr);
     }
     localStorage.setItem(todayKey, todaySecs.toString());
+
+    // Update guest profile in localStorage if playing as guest
+    const guestStr = localStorage.getItem('blackjack_guest_profile');
+    if (guestStr) {
+      try {
+        const gp = JSON.parse(guestStr);
+        gp.playtime_seconds = totalSeconds;
+        if (sessionSeconds > (gp.longest_session_seconds || 0)) {
+          gp.longest_session_seconds = sessionSeconds;
+        }
+        localStorage.setItem('blackjack_guest_profile', JSON.stringify(gp));
+      } catch {}
+    }
   } catch {
     // Ignore storage quota errors
   }

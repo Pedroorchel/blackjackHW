@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Player } from '../types';
-import { X, DollarSign, Activity, Camera, Trash2, Check, Edit2, Sparkles, Dices, Image as ImageIcon, Grid, RefreshCw, Clock } from 'lucide-react';
+import { X, DollarSign, Activity, Camera, Trash2, Check, Edit2, Sparkles, Dices, Image as ImageIcon, Grid, RefreshCw, Clock, TrendingUp } from 'lucide-react';
 import { resizeProfileImage } from '../utils/image';
 import { AVATAR_PRESETS, AVATAR_STYLES, AvatarStyle, generateUniqueAvatar, getRandomAvatarSeed } from '../utils/avatar';
 import { formatPlaytimeHuman, getStoredTotalPlaytime } from '../utils/playtime';
@@ -12,6 +12,7 @@ interface PlayerProfileModalProps {
   onUpdateProfile?: (name: string, avatarUrl: string) => void;
   playtimeSeconds?: number;
   onOpenPlaytimeScoreboard?: () => void;
+  onOpenStats?: () => void;
 }
 
 export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
@@ -20,7 +21,8 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   isSelf = false,
   onUpdateProfile,
   playtimeSeconds,
-  onOpenPlaytimeScoreboard
+  onOpenPlaytimeScoreboard,
+  onOpenStats
 }) => {
   if (!player) return null;
 
@@ -440,6 +442,25 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
                 </button>
               )}
             </div>
+          </div>
+
+          <div className="bg-stone-800/30 rounded-xl p-3.5 border border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-stone-400">
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-bold uppercase tracking-wider">Desempenho da Conta</span>
+            </div>
+            {onOpenStats ? (
+              <button
+                type="button"
+                onClick={onOpenStats}
+                className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-black uppercase rounded-lg cursor-pointer transition-colors flex items-center gap-1 shadow-sm"
+              >
+                <TrendingUp className="w-3 h-3 text-emerald-400" />
+                <span>Ver Gráfico</span>
+              </button>
+            ) : (
+              <span className="text-[10px] text-stone-400 font-mono">Atualiza por rodada</span>
+            )}
           </div>
 
           {totalDebts > 0 && (

@@ -269,6 +269,16 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
             #{(player.seatIndex ?? 0) + 1}
           </div>
 
+          {/* Bot Indicator Badge */}
+          {(player.isBot || player.id.startsWith('bot-')) && (
+            <div 
+              className="absolute -top-1 -right-1 bg-cyan-600 border border-cyan-400 text-white text-[8px] font-black px-1 rounded-full shadow"
+              title="Jogador Bot IA"
+            >
+              🤖
+            </div>
+          )}
+
           {/* Floating Crown Badge */}
           {player.isHost && (
             <div 
@@ -315,11 +325,15 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
               <span className="font-bold text-[11px] text-white truncate max-w-[80px]">
                 {player.name}
               </span>
-              {isSelf && (
+              {(player.isBot || player.id.startsWith('bot-')) ? (
+                <span className="text-[7px] bg-cyan-500/25 border border-cyan-400/50 text-cyan-300 font-black px-1 py-0.2 rounded shrink-0">
+                  BOT
+                </span>
+              ) : isSelf ? (
                 <span className="text-[8px] text-yellow-400 font-bold shrink-0">
                   (Você)
                 </span>
-              )}
+              ) : null}
               {isSelf && !isEditingName && (
                 <button
                   type="button"
@@ -353,6 +367,41 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
           <div className={`mt-1 flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-black select-none ${badgeStyle}`}>
             <span className="text-[11px]">{badgeEmoji}</span>
             <span>{player.wins} {player.wins === 1 ? 'VITÓRIA' : 'VITÓRIAS'}</span>
+          </div>
+        )}
+
+        {/* Bet Confirmation Status Indicator (Abaixo de vitórias / assento) */}
+        {!player.isSpectator && (
+          <div className="w-full mt-1">
+            {phase === 'betting' ? (
+              player.isReady ? (
+                <div 
+                  id={`seat-ready-${player.id}`}
+                  className="w-full flex items-center justify-center gap-1 py-0.5 px-1.5 rounded bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider shadow-[0_0_8px_rgba(16,185,129,0.25)] select-none animate-in fade-in"
+                  title="Aposta confirmada pelo jogador"
+                >
+                  <Check className="w-2.5 h-2.5 stroke-[3] text-emerald-400" />
+                  <span>Aposta Confirmada</span>
+                </div>
+              ) : (
+                <div 
+                  id={`seat-waiting-${player.id}`}
+                  className="w-full flex items-center justify-center gap-1 py-0.5 px-1.5 rounded bg-amber-500/15 border border-amber-500/35 text-amber-300 text-[8.5px] sm:text-[9px] font-bold uppercase tracking-wider select-none animate-pulse"
+                  title="Aguardando confirmação de aposta"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                  <span>Aguardando Aposta</span>
+                </div>
+              )
+            ) : player.currentBet > 0 ? (
+              <div 
+                id={`seat-bet-${player.id}`}
+                className="w-full flex items-center justify-center gap-1 py-0.5 px-1 rounded bg-stone-900/90 border border-stone-700/60 text-[8.5px] font-mono select-none"
+              >
+                <span className="text-stone-400 text-[8px] font-bold uppercase">Aposta:</span>
+                <span className="text-yellow-400 font-black">${player.currentBet}</span>
+              </div>
+            ) : null}
           </div>
         )}
 

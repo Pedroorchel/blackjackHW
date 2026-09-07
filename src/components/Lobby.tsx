@@ -1,9 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Spade, Heart, Diamond, Club, PlusCircle, LogIn, Sparkles, BookOpen, Terminal, Users, Eye, Coins, Zap, ChevronDown, Edit2, Clock, User } from 'lucide-react';
+import { Spade, Heart, Diamond, Club, PlusCircle, LogIn, Sparkles, BookOpen, Terminal, Users, Eye, Coins, Zap, ChevronDown, Edit2, Clock, User, TrendingUp } from 'lucide-react';
 import { motion } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { PlaytimeScoreboardModal } from './PlaytimeScoreboardModal';
+import { StatsDrawer } from './StatsDrawer';
+import { 
+  getStoredHandHistory,
+  getStoredBankrollHistory,
+  clearAccountStats,
+  HandHistoryItem,
+  BankrollHistoryItem
+} from '../utils/accountStats';
 import { 
   getStoredTotalPlaytime, 
   getStoredLongestSession, 
@@ -12,6 +20,7 @@ import {
   fetchAndSyncPlaytimeFromDatabase,
   persistPlaytime
 } from '../utils/playtime';
+import { generateFreshGuestProfile } from '../utils/botGenerator';
 
 export const GoogleIcon: React.FC<{ className?: string }> = ({ className = "w-5 h-5 shrink-0" }) => (
   <svg className={className} viewBox="0 0 24 24">
@@ -39,6 +48,7 @@ interface LobbyProps {
   onUpdatePlayerName: (name: string) => void;
   onCreateRoom: (playerName: string, wins?: number, chips?: number) => void;
   onJoinRoom: (roomId: string, playerName: string, wins?: number, chips?: number) => void;
+  onPlayWithBots?: (playerName: string, wins?: number, chips?: number) => void;
   onOpenRules: () => void;
   onOpenSetup: () => void;
   errorMessage?: string | null;
@@ -51,6 +61,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   onUpdatePlayerName,
   onCreateRoom,
   onJoinRoom,
+  onPlayWithBots,
   onOpenRules,
   onOpenSetup,
   errorMessage,
@@ -75,6 +86,9 @@ export const Lobby: React.FC<LobbyProps> = ({
   });
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isPlaytimeOpen, setIsPlaytimeOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [handHistory, setHandHistory] = useState<HandHistoryItem[]>([]);
+  const [bankrollHistory, setBankrollHistory] = useState<BankrollHistoryItem[]>([]);
   const [totalPlaytime, setTotalPlaytime] = useState(() => getStoredTotalPlaytime());
   const [todayPlaytime, setTodayPlaytime] = useState(() => getStoredTodayPlaytime());
   const [longestSession, setLongestSession] = useState(() => getStoredLongestSession());
@@ -84,7 +98,9 @@ export const Lobby: React.FC<LobbyProps> = ({
     setTotalPlaytime(getStoredTotalPlaytime(uid));
     setTodayPlaytime(getStoredTodayPlaytime(uid));
     setLongestSession(getStoredLongestSession(uid));
-  }, [isPlaytimeOpen, userProfile?.id]);
+    setHandHistory(getStoredHandHistory(uid));
+    setBankrollHistory(getStoredBankrollHistory(uid));
+  }, [isPlaytimeOpen, isStatsOpen, userProfile?.id]);
 
   const checkUser = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -130,12 +146,48 @@ export const Lobby: React.FC<LobbyProps> = ({
       } else {
         // Fallback if trigger hasn't run yet or Google user initial login
         const nameFromMeta = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Jogador';
-        const newProfile = { id: user.id, name: nameFromMeta, wins: 0, chips: 500 };
+        const newProfile = { 
+          id: user.id, 
+          name: nameFromMeta, 
+          wins: 0, 
+          chips: 1000,
+          playtime_seconds: 0,
+          longest_session_seconds: 0,
+          avatar_url: ''
+        };
         await supabase.from('profiles').upsert(newProfile);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('blackjack_player_avatar');
+          localStorage.setItem(`blackjack_total_playtime_seconds_${user.id}`, '0');
+          localStorage.setItem(`blackjack_longest_session_seconds_${user.id}`, '0');
+          localStorage.setItem(`blackjack_today_playtime_seconds_${user.id}`, '0');
+        }
+        setAvatar('');
         setUserProfile(newProfile);
         setName(nameFromMeta);
         onUpdatePlayerName(nameFromMeta);
+        setTotalPlaytime(0);
+        setLongestSession(0);
+        setTodayPlaytime(0);
+        if (onPlaytimeSync) {
+          onPlaytimeSync(0);
+        }
         setStep('room');
+      }
+
+      if (profile) {
+        // Sync avatar from profile if set
+        if (profile.avatar_url) {
+          setAvatar(profile.avatar_url);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('blackjack_player_avatar', profile.avatar_url);
+          }
+        } else {
+          setAvatar('');
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('blackjack_player_avatar');
+          }
+        }
       }
 
       // Sync playtime with database for this specific user account
@@ -150,7 +202,24 @@ export const Lobby: React.FC<LobbyProps> = ({
         }
       });
     } else {
-      // Fallback to local guest name if available
+      // Fallback to local guest profile if available
+      if (typeof window !== 'undefined') {
+        const guestRaw = localStorage.getItem('blackjack_guest_profile');
+        if (guestRaw) {
+          try {
+            const profile = JSON.parse(guestRaw);
+            if (profile && profile.id) {
+              setUserProfile(profile);
+              setName(profile.name);
+              onUpdatePlayerName(profile.name);
+              setStep('room');
+              return;
+            }
+          } catch {}
+        }
+      }
+
+      // Final fallback to just the name
       const localGuest = localStorage.getItem('blackjack_player_name');
       if (localGuest) {
         setName(localGuest);
@@ -275,16 +344,38 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   const handleGuestLogin = () => {
-    const guestName = name.trim() || 'Jogador Convidado';
-    setName(guestName);
-    onUpdatePlayerName(guestName);
-    const guestProfile = {
-      id: 'guest-' + Date.now(),
-      name: guestName,
-      wins: 0,
-      chips: 1000
-    };
+    // Generate a brand new, completely fresh guest profile out of trillions of combinations
+    const guestProfile = generateFreshGuestProfile();
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('blackjack_guest_profile', JSON.stringify(guestProfile));
+      localStorage.setItem('blackjack_player_name', guestProfile.name);
+      localStorage.setItem('blackjack_guest_chips', '1000');
+      localStorage.setItem('blackjack_guest_wins', '0');
+      localStorage.removeItem('blackjack_player_avatar');
+      localStorage.setItem(`blackjack_total_playtime_seconds_${guestProfile.id}`, '0');
+      localStorage.setItem(`blackjack_longest_session_seconds_${guestProfile.id}`, '0');
+      localStorage.setItem(`blackjack_today_playtime_seconds_${guestProfile.id}`, '0');
+      localStorage.setItem('blackjack_total_playtime_seconds', '0');
+      localStorage.setItem('blackjack_longest_session_seconds', '0');
+      localStorage.setItem('blackjack_today_playtime_seconds', '0');
+    }
+
+    clearAccountStats(guestProfile.id);
+
+    setName(guestProfile.name);
+    onUpdatePlayerName(guestProfile.name);
+    setAvatar('');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('blackjack_player_avatar');
+    }
     setUserProfile(guestProfile);
+    setTotalPlaytime(0);
+    setLongestSession(0);
+    setTodayPlaytime(0);
+    if (onPlaytimeSync) {
+      onPlaytimeSync(0);
+    }
     setStep('room');
   };
 
@@ -327,7 +418,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           id: user.id,
           name: nameVal,
           wins: profile?.wins || 0,
-          chips: profile?.chips || 500
+          chips: profile?.chips || 1000
         };
 
         if (!profile) {
@@ -356,6 +447,18 @@ export const Lobby: React.FC<LobbyProps> = ({
           setLongestSession(targetLongest);
           if (onPlaytimeSync) {
             onPlaytimeSync(targetPlaytime);
+          }
+        }
+
+        if (profile?.avatar_url) {
+          setAvatar(profile.avatar_url);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('blackjack_player_avatar', profile.avatar_url);
+          }
+        } else {
+          setAvatar('');
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('blackjack_player_avatar');
           }
         }
 
@@ -410,30 +513,36 @@ export const Lobby: React.FC<LobbyProps> = ({
 
       const user = data.user;
       if (user) {
-        // Create profile on Supabase
+        // Create new clean profile on Supabase: 1000 chips, 0 wins, 0 playtime, no avatar
         const uProfile = {
           id: user.id,
           name: name.trim(),
           wins: 0,
-          chips: 500
+          chips: 1000,
+          playtime_seconds: 0,
+          longest_session_seconds: 0,
+          avatar_url: ''
         };
         await supabase.from('profiles').upsert(uProfile);
 
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('blackjack_player_avatar');
+          localStorage.setItem(`blackjack_total_playtime_seconds_${user.id}`, '0');
+          localStorage.setItem(`blackjack_longest_session_seconds_${user.id}`, '0');
+          localStorage.setItem(`blackjack_today_playtime_seconds_${user.id}`, '0');
+        }
+
+        setAvatar('');
         setUserProfile(uProfile);
         setName(name.trim());
         onUpdatePlayerName(name.trim());
+        setTotalPlaytime(0);
+        setLongestSession(0);
+        setTodayPlaytime(0);
+        if (onPlaytimeSync) {
+          onPlaytimeSync(0);
+        }
         setStep('room');
-
-        fetchAndSyncPlaytimeFromDatabase(user.id).then(res => {
-          if (res) {
-            setTotalPlaytime(res.totalSeconds);
-            setLongestSession(res.longestSessionSeconds);
-            setTodayPlaytime(getStoredTodayPlaytime(user.id));
-            if (onPlaytimeSync) {
-              onPlaytimeSync(res.totalSeconds);
-            }
-          }
-        });
       }
     } catch (err: any) {
       setLocalError(err.message || 'Erro de conexão.');
@@ -442,10 +551,22 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('blackjack_guest_profile');
+      localStorage.removeItem('blackjack_player_name');
+      localStorage.removeItem('blackjack_guest_chips');
+      localStorage.removeItem('blackjack_guest_wins');
+      localStorage.removeItem('blackjack_player_avatar');
+      localStorage.removeItem('blackjack_total_playtime_seconds');
+      localStorage.removeItem('blackjack_longest_session_seconds');
+      localStorage.removeItem('blackjack_today_playtime_seconds');
+    }
     setUserProfile(null);
     setStep('login');
     setPassword('');
     setEmail('');
+    setName('Jogador');
+    setAvatar('');
     setTotalPlaytime(0);
     setLongestSession(0);
     setTodayPlaytime(0);
@@ -459,6 +580,17 @@ export const Lobby: React.FC<LobbyProps> = ({
     const finalName = name.trim() || 'Jogador';
     onUpdatePlayerName(finalName);
     onCreateRoom(finalName, userProfile?.wins, userProfile?.chips);
+  };
+
+  const handlePlayBots = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const finalName = name.trim() || 'Jogador';
+    onUpdatePlayerName(finalName);
+    if (onPlayWithBots) {
+      onPlayWithBots(finalName, userProfile?.wins, userProfile?.chips);
+    } else {
+      onCreateRoom(finalName, userProfile?.wins, userProfile?.chips);
+    }
   };
 
   const handleJoin = (e: React.FormEvent) => {
@@ -567,6 +699,25 @@ export const Lobby: React.FC<LobbyProps> = ({
                     </span>
                   </p>
                 </div>
+
+                <div 
+                  id="lobby-desempenho-btn"
+                  className="text-center md:text-right cursor-pointer group bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-500/30 hover:border-emerald-500/60 px-3 py-1.5 rounded-xl transition-all shadow-md"
+                  onClick={() => setIsStatsOpen(true)}
+                  title="Abrir Desempenho e Histórico da Conta (Atualiza a cada rodada)"
+                >
+                  <p className="text-[8px] sm:text-[9px] uppercase font-bold text-emerald-400 tracking-widest mb-0.5 flex items-center justify-center md:justify-end gap-1">
+                    <TrendingUp className="w-2.5 h-2.5 text-emerald-400" /> Desempenho
+                  </p>
+                  <p className="text-xs sm:text-sm font-black text-white font-mono group-hover:text-emerald-300 flex items-center justify-center md:justify-end gap-1 transition-colors">
+                    <span>Gráfico & Rodadas</span>
+                    {handHistory.length > 0 && (
+                      <span className="text-[9px] font-sans font-black uppercase px-1.5 py-0.2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-full">
+                        {handHistory.length}
+                      </span>
+                    )}
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -601,15 +752,29 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCreate}
-                  disabled={isConnecting}
-                  className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.15em] text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-stone-950 shadow-[0_4px_25px_rgba(16,185,129,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0 cursor-pointer"
-                >
-                  <PlusCircle className="w-5 h-5 text-stone-950" />
-                  Abrir Mesa VIP
-                </button>
+                <div className="space-y-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleCreate}
+                    disabled={isConnecting}
+                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.15em] text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-stone-950 shadow-[0_4px_25px_rgba(16,185,129,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0 cursor-pointer"
+                  >
+                    <PlusCircle className="w-5 h-5 text-stone-950" />
+                    Abrir Mesa VIP
+                  </button>
+
+                  {/* Opção Posicionada Debaixo de Criar a Sala */}
+                  <button
+                    type="button"
+                    id="btn-play-bots-under-create"
+                    onClick={handlePlayBots}
+                    disabled={isConnecting}
+                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.12em] text-xs sm:text-sm bg-gradient-to-r from-cyan-950/90 via-cyan-900/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-300 border border-cyan-500/50 hover:border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 cursor-pointer"
+                  >
+                    <span className="text-lg">🤖</span>
+                    <span>Jogar contra Bots de IA (Treino Solo)</span>
+                  </button>
+                </div>
               </div>
 
               {/* Card 2: Entrar na Sala via Código (Column span 5) */}
@@ -647,7 +812,37 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </form>
               </div>
 
-              {/* Card 3: Dealer Tips & Responsible Play (Column span 12) */}
+              {/* Card 3: Jogar com Bots de IA (Column span 12) */}
+              <div className="md:col-span-12 bg-gradient-to-r from-stone-900/90 via-cyan-950/40 to-stone-900/90 border border-cyan-500/40 backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden group flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 blur-[60px] rounded-full -z-10" />
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(6,182,212,0.3)] shrink-0">
+                    🤖
+                  </div>
+                  <div>
+                    <div className="inline-flex items-center gap-1.5 mb-1 px-2.5 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold uppercase tracking-widest">
+                      <Sparkles className="w-3 h-3" /> Milhões de Bots • Rotação Dinâmica
+                    </div>
+                    <h3 className="text-xl sm:text-2xl font-black text-white uppercase tracking-wider mb-1">
+                      Jogar com Bots de IA
+                    </h3>
+                    <p className="text-xs sm:text-sm text-stone-300 max-w-xl">
+                      Enfrente uma infinidade de jogadores virtuais com nomes, fotos, saldos e táticas únicas. A cada rodada, novos bots entram e saem da mesa mantendo o jogo sempre renovado e desafiador!
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="btn-play-with-bots"
+                  onClick={handlePlayBots}
+                  disabled={isConnecting}
+                  className="w-full md:w-auto px-8 py-4 rounded-xl font-black uppercase tracking-[0.15em] text-xs sm:text-sm bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-stone-950 shadow-[0_4px_25px_rgba(6,182,212,0.35)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 disabled:opacity-50 cursor-pointer shrink-0"
+                >
+                  <span>🎮 Entrar na Mesa com Bots</span>
+                </button>
+              </div>
+
+              {/* Card 4: Dealer Tips & Responsible Play (Column span 12) */}
               <div className="md:col-span-12 bg-gradient-to-r from-stone-900/60 to-emerald-950/20 border border-stone-800/80 backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
@@ -1047,6 +1242,10 @@ export const Lobby: React.FC<LobbyProps> = ({
             setIsEditingProfile(false);
             setIsPlaytimeOpen(true);
           }}
+          onOpenStats={() => {
+            setIsEditingProfile(false);
+            setIsStatsOpen(true);
+          }}
           onUpdateProfile={(updatedName, updatedAvatar) => {
             setName(updatedName);
             setAvatar(updatedAvatar);
@@ -1057,6 +1256,31 @@ export const Lobby: React.FC<LobbyProps> = ({
           }}
         />
       )}
+
+      {/* Painel de Desempenho Isolado da Conta */}
+      <StatsDrawer
+        handHistory={handHistory}
+        bankrollHistory={bankrollHistory}
+        currentChips={chipsCount}
+        currentRound={handHistory.length}
+        sessionSeconds={0}
+        totalSeconds={totalPlaytime}
+        playerName={name}
+        accountType={userProfile ? 'Conta Cadastrada' : 'Conta Convidado'}
+        isLobbyView={true}
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        onToggle={() => setIsStatsOpen(prev => !prev)}
+        onClearHistory={() => {
+          clearAccountStats(userProfile?.id);
+          setHandHistory([]);
+          setBankrollHistory([]);
+        }}
+        onOpenPlaytimeScoreboard={() => {
+          setIsStatsOpen(false);
+          setIsPlaytimeOpen(true);
+        }}
+      />
 
       {/* Placar de Tempo de Jogo */}
       <PlaytimeScoreboardModal

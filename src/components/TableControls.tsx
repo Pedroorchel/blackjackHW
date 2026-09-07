@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Player, RoundPhase } from '../types';
 import { Chip } from './Chip';
-import { Play, RotateCcw, Check, Sparkles, Eye, Menu, Plus, Minus } from 'lucide-react';
+import { Play, RotateCcw, Check, Sparkles, Eye, Menu, Plus, Minus, Crown } from 'lucide-react';
 import { sounds } from '../utils/audio';
 
 interface TableControlsProps {
@@ -10,6 +10,8 @@ interface TableControlsProps {
   isHost: boolean;
   phase: RoundPhase;
   canStartDeal: boolean;
+  botsCount?: number;
+  maxBots?: number;
   onBetChange: (amount: number) => void;
   onReadyToggle: () => void;
   onStartDeal: () => void;
@@ -17,6 +19,9 @@ interface TableControlsProps {
   onStand: () => void;
   onDouble: () => void;
   onNewRound: () => void;
+  onAddBot?: () => void;
+  onRemoveBot?: () => void;
+  onToggleBots?: () => void;
 }
 
 const CHIP_VALUES = [10, 25, 50, 100, 500];
@@ -27,13 +32,18 @@ export const TableControls: React.FC<TableControlsProps> = ({
   isHost,
   phase,
   canStartDeal,
+  botsCount = 0,
+  maxBots = 5,
   onBetChange,
   onReadyToggle,
   onStartDeal,
   onHit,
   onStand,
   onDouble,
-  onNewRound
+  onNewRound,
+  onAddBot,
+  onRemoveBot,
+  onToggleBots
 }) => {
   const [showViewToggle, setShowViewToggle] = useState(false);
 
@@ -50,7 +60,8 @@ export const TableControls: React.FC<TableControlsProps> = ({
   };
 
   const handleClearBet = () => {
-    onBetChange(10);
+    sounds.playChipBet();
+    onBetChange(0);
   };
 
   const handleAllIn = () => {
@@ -68,9 +79,16 @@ export const TableControls: React.FC<TableControlsProps> = ({
               <span className="text-[10px] sm:text-xs text-white/40 uppercase font-bold tracking-widest block">
                 Sua Aposta
               </span>
-              <span className="text-xl sm:text-2xl font-black text-yellow-400">
-                ${selfPlayer.currentBet}
-              </span>
+              <div className="flex items-baseline gap-2">
+                <span className={`text-xl sm:text-2xl font-black ${selfPlayer.currentBet > 0 ? 'text-yellow-400' : 'text-stone-400'}`}>
+                  ${selfPlayer.currentBet.toLocaleString()}
+                </span>
+                {selfPlayer.currentBet === 0 && (
+                  <span className="text-[11px] text-amber-400/80 font-semibold animate-pulse">
+                    ← Clique nas fichas abaixo
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -78,19 +96,19 @@ export const TableControls: React.FC<TableControlsProps> = ({
                 type="button"
                 id="btn-clear-bet"
                 onClick={handleClearBet}
-                disabled={selfPlayer.isReady || selfPlayer.currentBet <= 10}
+                disabled={selfPlayer.isReady || selfPlayer.currentBet === 0}
                 className="px-3 py-1.5 text-xs rounded-lg bg-stone-800 border border-white/10 text-white/80 hover:bg-stone-700 disabled:opacity-40 transition-colors cursor-pointer font-bold"
               >
-                Mínimo ($10)
+                Limpar ($0)
               </button>
               <button
                 type="button"
                 id="btn-all-in"
                 onClick={handleAllIn}
-                disabled={selfPlayer.isReady || selfPlayer.chips <= selfPlayer.currentBet}
-                className="px-3 py-1.5 text-xs rounded-lg bg-yellow-500 text-black hover:bg-yellow-400 font-black disabled:opacity-40 transition-colors cursor-pointer"
+                disabled={selfPlayer.isReady || selfPlayer.chips <= 0 || selfPlayer.currentBet === selfPlayer.chips}
+                className="px-3.5 py-1.5 text-xs rounded-lg bg-yellow-500 text-black hover:bg-yellow-400 font-black disabled:opacity-40 transition-all cursor-pointer shadow-[0_0_10px_rgba(234,179,8,0.2)] active:scale-95"
               >
-                All-In (${selfPlayer.chips})
+                🔥 All-In (${selfPlayer.chips.toLocaleString()})
               </button>
             </div>
           </div>
@@ -102,7 +120,7 @@ export const TableControls: React.FC<TableControlsProps> = ({
                 key={val}
                 value={val}
                 size="md"
-                disabled={selfPlayer.isReady || selfPlayer.chips < val}
+                disabled={selfPlayer.isReady || selfPlayer.chips < (selfPlayer.currentBet + val)}
                 onClick={() => handleAddChip(val)}
               />
             ))}
@@ -112,31 +130,72 @@ export const TableControls: React.FC<TableControlsProps> = ({
           <div className="flex items-center gap-3 mt-1 justify-center flex-wrap">
             <button
               type="button"
-              id="btn-toggle-ready"
+              id="btn-confirm-bet"
               onClick={onReadyToggle}
-              className={`px-8 py-3 rounded-xl font-extrabold uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95 cursor-pointer ${
-                selfPlayer.isReady
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                  : 'bg-yellow-500 hover:bg-yellow-400 text-black'
+              disabled={selfPlayer.isReady || selfPlayer.currentBet <= 0 || selfPlayer.chips <= 0}
+              className={`px-10 py-3.5 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
+                selfPlayer.currentBet > 0 && !selfPlayer.isReady
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 shadow-[0_0_20px_rgba(16,185,129,0.35)]'
+                  : 'bg-stone-800 text-stone-400 border border-white/10 opacity-60 cursor-not-allowed'
               }`}
             >
-              <Check className="w-4 h-4" />
-              {selfPlayer.isReady ? 'Aposta Pronta (Cancelar)' : 'Confirmar Aposta'}
+              <Play className="w-4 h-4 fill-current text-current" />
+              <span>
+                {selfPlayer.isReady
+                  ? '✓ Aposta Confirmada (Iniciando...)'
+                  : selfPlayer.currentBet > 0
+                  ? `✓ Confirmar Aposta ($${selfPlayer.currentBet.toLocaleString()}) e Jogar`
+                  : 'Escolha um valor nas fichas para Jogar'}
+              </span>
             </button>
-
-            {isHost && (
-              <button
-                type="button"
-                id="btn-start-deal"
-                onClick={onStartDeal}
-                disabled={!canStartDeal}
-                className="bg-stone-800 hover:bg-stone-700 text-white px-8 py-3 rounded-xl font-extrabold uppercase tracking-wider text-xs sm:text-sm border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-transform active:scale-95 cursor-pointer flex items-center gap-2"
-              >
-                <Play className="w-4 h-4 fill-current text-yellow-400" />
-                Distribuir Cartas
-              </button>
-            )}
           </div>
+
+          {/* Bot Management Panel (Quick + / - Bots) */}
+          {onAddBot && (
+            <div className="flex items-center justify-between pt-2 border-t border-white/10 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🤖</span>
+                <span className="text-[11px] font-bold text-stone-300">
+                  Jogadores Bots na Mesa: <strong className="text-cyan-400">{botsCount}</strong> / {maxBots}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {onToggleBots && (
+                  <button
+                    type="button"
+                    id="btn-toggle-bots"
+                    onClick={onToggleBots}
+                    className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg bg-stone-800 hover:bg-stone-700 border border-white/10 text-stone-300 cursor-pointer transition-colors"
+                  >
+                    {botsCount > 0 ? 'Limpar Bots' : 'Preencher com Bots'}
+                  </button>
+                )}
+                {onRemoveBot && (
+                  <button
+                    type="button"
+                    id="btn-remove-bot"
+                    onClick={onRemoveBot}
+                    disabled={botsCount <= 0}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-red-950/40 hover:bg-red-900/50 border border-red-500/30 text-red-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                    title="Remover 1 Bot"
+                  >
+                    - Bot
+                  </button>
+                )}
+                <button
+                  type="button"
+                  id="btn-add-bot"
+                  onClick={onAddBot}
+                  disabled={botsCount >= maxBots}
+                  className="px-3 py-1 text-[10px] font-black uppercase rounded-lg bg-cyan-600 hover:bg-cyan-500 border border-cyan-400 text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors flex items-center gap-1 shadow-[0_0_10px_rgba(6,182,212,0.3)]"
+                  title="Adicionar 1 Bot inteligente"
+                >
+                  <Plus className="w-3 h-3" /> Adicionar Bot
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -253,15 +312,23 @@ export const TableControls: React.FC<TableControlsProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            id="btn-new-round"
-            onClick={onNewRound}
-            className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-black px-8 py-3 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-lg"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Nova Rodada
-          </button>
+          {isHost ? (
+            <button
+              type="button"
+              id="btn-new-round"
+              onClick={onNewRound}
+              className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-400 text-black px-8 py-3 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-yellow-500/20"
+            >
+              <RotateCcw className="w-4 h-4 stroke-[3]" />
+              <Crown className="w-4 h-4 fill-current text-stone-900" />
+              <span>Iniciar Nova Rodada</span>
+            </button>
+          ) : (
+            <div className="w-full sm:w-auto px-6 py-3 rounded-xl bg-stone-900/90 border border-stone-800 text-stone-400 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 select-none shadow-md">
+              <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Aguardando Criador da Sala iniciar a nova rodada...</span>
+            </div>
+          )}
         </div>
       )}
     </div>

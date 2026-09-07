@@ -1,5 +1,11 @@
 import { Card, Dealer, OutcomeType, Player, RoomState, RoundPhase, TableChatMessage } from '../types';
 import { calculateHandScore, createDeck } from './blackjack';
+import { 
+  generateUniqueBot, 
+  BOT_CHAT_GREETINGS, 
+  BOT_WIN_REACTIONS, 
+  BOT_BUST_REACTIONS 
+} from './botGenerator';
 
 export interface LocalEngineListener {
   onState: (state: RoomState) => void;
@@ -19,7 +25,6 @@ export class LocalGameEngine {
   private listeners: LocalEngineListener[] = [];
   private turnTimeout: number = 20;
   private turnStartTime?: number;
-  private dealerTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     this.shoe = createDeck();
@@ -67,7 +72,14 @@ export class LocalGameEngine {
     return { ...card, hidden };
   }
 
-  public createRoom(playerName: string, wins: number = 0, chips: number = 1000, avatarUrl?: string, customRoomId?: string): string {
+  public createRoom(
+    playerName: string, 
+    wins: number = 0, 
+    chips: number = 1000, 
+    avatarUrl?: string, 
+    customRoomId?: string,
+    initialBotsCount: number = 3
+  ): string {
     this.roomId = customRoomId || ('MESA-' + Math.floor(100 + Math.random() * 900));
     this.hostId = 'local-player';
     this.phase = 'betting';
@@ -76,7 +88,7 @@ export class LocalGameEngine {
       {
         id: 'msg-welcome',
         senderName: 'Dealer VIP',
-        text: `Bem-vindo à Mesa ${this.roomId}! Faça sua aposta e clique em "Distribuir Cartas".`,
+        text: `Bem-vindo à Mesa VIP ${this.roomId}! Faça suas apostas contra a mesa e os bots convidados.`,
         timestamp: Date.now(),
       }
     ];
@@ -88,37 +100,27 @@ export class LocalGameEngine {
       {
         id: 'local-player',
         name: playerName || 'Jogador',
-        chips: initialChips - initialBet,
-        currentBet: initialBet,
+        chips: initialChips,
+        currentBet: 0,
         cards: [],
         status: 'betting',
         outcome: null,
         payout: 0,
         isHost: true,
-        isReady: true,
+        isReady: false,
         seatIndex: 0,
         debts: {},
         wins: wins || 0,
         avatarUrl,
-      },
-      // Virtual casino player for realistic multiplayer atmosphere
-      {
-        id: 'bot-1',
-        name: 'Carlos (VIP)',
-        chips: 1500,
-        currentBet: 50,
-        cards: [],
-        status: 'ready',
-        outcome: null,
-        payout: 0,
-        isHost: false,
-        isReady: true,
-        seatIndex: 2,
-        debts: {},
-        wins: 14,
-        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        isBot: false,
       }
     ];
+
+    // Populate initial bots with completely unique procedural generation
+    const count = Math.min(initialBotsCount, 5);
+    for (let i = 0; i < count; i++) {
+      this.addBot(false);
+    }
 
     this.dealer = {
       cards: [],
@@ -132,25 +134,108 @@ export class LocalGameEngine {
     return this.roomId;
   }
 
+  public addBot(emit: boolean = true): boolean {
+    if (this.players.length >= 6) {
+      this.emitEvent('error', 'A mesa já está cheia (máximo de 6 jogadores).');
+      return false;
+    }
+
+    // Find first free seat index
+    const takenSeats = new Set(this.players.map(p => p.seatIndex));
+    let availableSeat = 1;
+    for (let s = 1; s <= 5; s++) {
+      if (!takenSeats.has(s)) {
+        availableSeat = s;
+        break;
+      }
+    }
+
+    // Generate unique procedural bot
+    const excludedIds = this.players.map(p => p.id);
+    const botPlayer = generateUniqueBot(availableSeat, excludedIds);
+    botPlayer.status = this.phase === 'betting' ? 'ready' : 'waiting';
+
+    this.players.push(botPlayer);
+
+    const greeting = BOT_CHAT_GREETINGS[Math.floor(Math.random() * BOT_CHAT_GREETINGS.length)];
+    this.messages.push({
+      id: 'bot-join-' + Date.now() + '-' + Math.random(),
+      senderName: botPlayer.name,
+      text: greeting,
+      timestamp: Date.now(),
+    });
+
+    if (emit) {
+      this.emitEvent('info', `🤖 ${botPlayer.name} entrou na mesa com $${botPlayer.chips + botPlayer.currentBet}!`);
+      this.emitState();
+    }
+    return true;
+  }
+
+  public removeBot(botId?: string): boolean {
+    const bots = this.players.filter(p => p.isBot);
+    if (bots.length === 0) {
+      this.emitEvent('info', 'Não há bots na mesa para remover.');
+      return false;
+    }
+
+    const targetBot = botId ? bots.find(b => b.id === botId) : bots[bots.length - 1];
+    if (!targetBot) return false;
+
+    this.players = this.players.filter(p => p.id !== targetBot.id);
+
+    this.messages.push({
+      id: 'bot-leave-' + Date.now(),
+      senderName: 'Dealer VIP',
+      text: `🤖 ${targetBot.name} saiu da mesa e retirou suas fichas.`,
+      timestamp: Date.now(),
+    });
+
+    this.emitEvent('info', `🤖 ${targetBot.name} saiu da mesa.`);
+    this.emitState();
+    return true;
+  }
+
+  public toggleBots(): void {
+    const bots = this.players.filter(p => p.isBot);
+    if (bots.length > 0) {
+      this.players = this.players.filter(p => !p.isBot);
+      this.emitEvent('info', 'Todos os bots foram removidos da mesa.');
+      this.emitState();
+    } else {
+      this.addBot(false);
+      this.addBot(false);
+      this.addBot(false);
+      this.emitEvent('info', '3 novos jogadores Bots de IA entraram na mesa!');
+      this.emitState();
+    }
+  }
+
   public setBet(playerId: string, amount: number) {
     const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
     if (!p || this.phase !== 'betting') return;
 
-    const totalMoney = p.chips + p.currentBet;
-    const newBet = Math.max(10, Math.min(amount, totalMoney));
-    p.chips = totalMoney - newBet;
-    p.currentBet = newBet;
-    p.isReady = true;
-    p.status = 'ready';
+    const validBet = Math.max(0, Math.min(amount, p.chips));
+    p.currentBet = validBet;
+    p.isReady = false;
+    p.status = 'betting';
     this.emitState();
   }
 
   public toggleReady(playerId: string) {
     const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
     if (!p || this.phase !== 'betting') return;
-    p.isReady = !p.isReady;
-    p.status = p.isReady ? 'ready' : 'betting';
+
+    p.isReady = true;
+    p.status = 'ready';
     this.emitState();
+
+    // In local engine / bot table, confirming bet starts the deal immediately
+    setTimeout(() => {
+      if (this.phase === 'betting') {
+        this.startDeal();
+      }
+    }, 150);
   }
 
   public startDeal() {
@@ -159,7 +244,7 @@ export class LocalGameEngine {
     this.phase = 'dealing';
     this.emitEvent('deal', 'O Dealer começou a distribuição das cartas!');
 
-    // Reset hands
+    // Reset hands and deduct bets
     this.dealer = {
       cards: [],
       score: 0,
@@ -173,6 +258,7 @@ export class LocalGameEngine {
       p.outcome = null;
       p.payout = 0;
       if (p.currentBet > 0) {
+        p.chips -= p.currentBet;
         p.status = 'playing';
       } else {
         p.status = 'waiting';
@@ -216,15 +302,24 @@ export class LocalGameEngine {
       });
 
       this.phase = 'player_turns';
-      this.activePlayerId = 'local-player';
       this.turnStartTime = Date.now();
       this.turnTimeout = 20;
 
-      const self = this.players.find(p => p.id === 'local-player');
-      if (self && self.status === 'blackjack') {
-        this.advanceTurn();
+      // Start with first active player
+      const activePlayers = this.players.filter(p => p.currentBet > 0);
+      const firstPlayer = activePlayers.find(p => p.status === 'playing');
+
+      if (firstPlayer) {
+        this.activePlayerId = firstPlayer.id;
+        if (firstPlayer.isBot) {
+          this.emitState();
+          setTimeout(() => this.runBotTurn(firstPlayer), 900);
+        } else {
+          this.emitState();
+        }
       } else {
-        this.emitState();
+        this.activePlayerId = null;
+        this.startDealerTurn();
       }
     }, 600);
   }
@@ -306,11 +401,12 @@ export class LocalGameEngine {
     if (nextPlayer) {
       this.activePlayerId = nextPlayer.id;
       nextPlayer.status = 'playing';
+      this.turnStartTime = Date.now();
 
       // Bot turn automation
-      if (nextPlayer.id.startsWith('bot-')) {
+      if (nextPlayer.isBot || nextPlayer.id.startsWith('bot-')) {
         this.emitState();
-        setTimeout(() => this.runBotTurn(nextPlayer!), 1000);
+        setTimeout(() => this.runBotTurn(nextPlayer!), 900);
       } else {
         this.emitState();
       }
@@ -320,24 +416,100 @@ export class LocalGameEngine {
     }
   }
 
+  // Realistic Blackjack Basic Strategy & Personality for AI Bots
   private runBotTurn(bot: Player) {
+    if (this.phase !== 'player_turns' || this.activePlayerId !== bot.id) return;
+
+    const dealerVisibleCard = this.dealer.cards[0];
+    const dealerUpVal = dealerVisibleCard 
+      ? (dealerVisibleCard.rank === 'A' ? 11 : ['K','Q','J','10'].includes(dealerVisibleCard.rank) ? 10 : parseInt(dealerVisibleCard.rank, 10)) 
+      : 10;
+
     const botScore = calculateHandScore(bot.cards);
-    if (botScore.total < 16) {
-      bot.cards.push(this.drawCard(false));
+
+    // Can bot double down? (2 cards, 9, 10 or 11 against dealer weak card)
+    if (bot.cards.length === 2 && bot.chips >= bot.currentBet) {
+      const isGoodDouble = (botScore.total === 11) || 
+                           (botScore.total === 10 && dealerUpVal <= 9) || 
+                           (botScore.total === 9 && dealerUpVal >= 3 && dealerUpVal <= 6 && (bot.botPersonality === 'aggressive' || bot.botPersonality === 'high_roller'));
+      if (isGoodDouble) {
+        bot.chips -= bot.currentBet;
+        bot.currentBet *= 2;
+        bot.status = 'doubled';
+        const card = this.drawCard(false);
+        bot.cards.push(card);
+        const finalScore = calculateHandScore(bot.cards);
+        if (finalScore.isBust) {
+          bot.status = 'busted';
+          bot.outcome = 'bust';
+          this.emitEvent('bust', `🤖 ${bot.name} dobrou e estourou com ${finalScore.total}!`);
+        } else {
+          bot.status = 'stand';
+          this.emitEvent('double', `🤖 ${bot.name} dobrou e parou com ${finalScore.total} pontos.`);
+        }
+        this.emitState();
+        setTimeout(() => this.advanceTurn(), 800);
+        return;
+      }
+    }
+
+    // Strategy decision
+    let shouldHit = false;
+
+    if (botScore.isBust) {
+      bot.status = 'busted';
+      bot.outcome = 'bust';
+      this.advanceTurn();
+      return;
+    }
+
+    if (botScore.total >= 17 && !botScore.isSoft) {
+      shouldHit = false;
+    } else if (botScore.total <= 11) {
+      shouldHit = true;
+    } else if (botScore.total >= 12 && botScore.total <= 16) {
+      if (botScore.isSoft) {
+        shouldHit = true;
+      } else {
+        if (bot.botPersonality === 'aggressive' && botScore.total === 16 && dealerUpVal >= 7) {
+          shouldHit = true;
+        } else if (bot.botPersonality === 'conservative' && botScore.total >= 13) {
+          shouldHit = dealerUpVal >= 8;
+        } else {
+          shouldHit = dealerUpVal >= 7;
+        }
+      }
+    } else if (botScore.isSoft && botScore.total === 17) {
+      shouldHit = true;
+    } else {
+      shouldHit = false;
+    }
+
+    if (shouldHit) {
+      const card = this.drawCard(false);
+      bot.cards.push(card);
       const newScore = calculateHandScore(bot.cards);
+      this.emitEvent('hit', `🤖 ${bot.name} pediu carta.`);
+      this.emitState();
+
       if (newScore.isBust) {
         bot.status = 'busted';
         bot.outcome = 'bust';
-        this.emitEvent('bust', `${bot.name} pediu carta e estourou com ${newScore.total}!`);
-      } else {
+        this.emitEvent('bust', `🤖 ${bot.name} estourou com ${newScore.total}!`);
+        setTimeout(() => this.advanceTurn(), 800);
+      } else if (newScore.total === 21) {
         bot.status = 'stand';
-        this.emitEvent('stand', `${bot.name} pediu carta e parou com ${newScore.total}.`);
+        this.emitEvent('stand', `🤖 ${bot.name} atingiu 21 e parou.`);
+        setTimeout(() => this.advanceTurn(), 800);
+      } else {
+        setTimeout(() => this.runBotTurn(bot), 900);
       }
     } else {
       bot.status = 'stand';
-      this.emitEvent('stand', `${bot.name} parou com ${botScore.total}.`);
+      this.emitEvent('stand', `🤖 ${bot.name} parou com ${botScore.total} pontos.`);
+      this.emitState();
+      setTimeout(() => this.advanceTurn(), 700);
     }
-    this.advanceTurn();
   }
 
   private startDealerTurn() {
@@ -346,7 +518,6 @@ export class LocalGameEngine {
     this.emitState();
 
     setTimeout(() => {
-      // Reveal dealer hole card
       this.dealer.cards = this.dealer.cards.map(c => ({ ...c, hidden: false }));
       const currentScore = calculateHandScore(this.dealer.cards);
       this.dealer.score = currentScore.total;
@@ -403,6 +574,15 @@ export class LocalGameEngine {
       if (p.status === 'busted' || pScore.isBust) {
         p.outcome = 'bust';
         p.payout = 0;
+        if (p.isBot && Math.random() < 0.25) {
+          const bustReaction = BOT_BUST_REACTIONS[Math.floor(Math.random() * BOT_BUST_REACTIONS.length)];
+          this.messages.push({
+            id: 'bot-react-' + Date.now() + '-' + Math.random(),
+            senderName: p.name,
+            text: bustReaction,
+            timestamp: Date.now(),
+          });
+        }
       } else if (p.status === 'blackjack' || pScore.isBlackjack) {
         if (dealerScore.isBlackjack) {
           p.outcome = 'push';
@@ -413,6 +593,15 @@ export class LocalGameEngine {
           p.payout = Math.floor(p.currentBet * 2.5);
           p.chips += p.payout;
           p.wins = (p.wins || 0) + 1;
+          if (p.isBot && Math.random() < 0.4) {
+            const winReaction = BOT_WIN_REACTIONS[Math.floor(Math.random() * BOT_WIN_REACTIONS.length)];
+            this.messages.push({
+              id: 'bot-react-' + Date.now() + '-' + Math.random(),
+              senderName: p.name,
+              text: winReaction,
+              timestamp: Date.now(),
+            });
+          }
         }
       } else if (dealerScore.isBust) {
         p.outcome = 'win';
@@ -445,6 +634,11 @@ export class LocalGameEngine {
     this.emitState();
   }
 
+  /**
+   * New round with Dynamic Bot Rotation:
+   * Every round, some bots rotate out, new procedural bots join the table,
+   * keeping the table constantly evolving with millions of unique combinations!
+   */
   public newRound() {
     this.roundNumber += 1;
     this.phase = 'betting';
@@ -458,19 +652,63 @@ export class LocalGameEngine {
       statusText: 'Façam suas apostas na mesa',
     };
 
-    this.players.forEach(p => {
+    // Bot Rotation Logic: 40% chance for a bot to rotate out and be replaced by a brand new one
+    const currentBots = this.players.filter(p => p.isBot);
+    const nonBots = this.players.filter(p => !p.isBot);
+    const updatedBots: Player[] = [];
+
+    currentBots.forEach(bot => {
+      // If bot has low chips or by random casino rotation (35% probability), swap with a new bot
+      const shouldRotate = bot.chips < 100 || Math.random() < 0.35;
+      if (shouldRotate) {
+        const newBot = generateUniqueBot(bot.seatIndex ?? 1, this.players.map(p => p.id));
+        updatedBots.push(newBot);
+        
+        this.messages.push({
+          id: 'bot-swap-' + Date.now() + '-' + Math.random(),
+          senderName: 'Dealer VIP',
+          text: `🔄 ${bot.name} saiu da mesa. Bem-vindo(a) ${newBot.name} ($${newBot.chips + newBot.currentBet})!`,
+          timestamp: Date.now(),
+        });
+      } else {
+        // Keep bot and reset their state with a realistic next bet
+        bot.cards = [];
+        bot.outcome = null;
+        bot.payout = 0;
+        
+        let bet = 50;
+        if (bot.botPersonality === 'high_roller') bet = Math.min(300, Math.floor(bot.chips * 0.12));
+        else if (bot.botPersonality === 'casual') bet = 25;
+        else if (bot.botPersonality === 'aggressive') bet = Math.min(150, Math.floor(bot.chips * 0.09));
+        else bet = Math.min(75, Math.floor(bot.chips * 0.05));
+        
+        bet = Math.round(bet / 5) * 5;
+        bet = Math.max(10, Math.min(bet, bot.chips));
+
+        bot.currentBet = bet;
+        bot.chips -= bet;
+        bot.isReady = true;
+        bot.status = 'ready';
+        updatedBots.push(bot);
+      }
+    });
+
+    this.players = [...nonBots, ...updatedBots];
+
+    // Reset non-bot players
+    nonBots.forEach(p => {
       p.cards = [];
       p.outcome = null;
       p.payout = 0;
+
       if (p.chips <= 0) {
-        // Free emergency reload if bankrupt
         p.chips = 500;
-        this.emitEvent('info', `${p.name} recebeu um bônus de fichas da casa!`);
+        this.emitEvent('info', `${p.name} recarregou fichas do cassino!`);
       }
-      p.currentBet = Math.min(p.currentBet > 0 ? p.currentBet : 25, p.chips);
-      p.chips -= p.currentBet;
-      p.isReady = true;
-      p.status = 'ready';
+
+      p.currentBet = 0;
+      p.isReady = false;
+      p.status = 'betting';
     });
 
     this.emitState();

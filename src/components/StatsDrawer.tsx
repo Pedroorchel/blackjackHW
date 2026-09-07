@@ -33,6 +33,9 @@ interface StatsDrawerProps {
   currentRound?: number;
   sessionSeconds?: number;
   totalSeconds?: number;
+  playerName?: string;
+  accountType?: string;
+  isLobbyView?: boolean;
   onOpenPlaytimeScoreboard?: () => void;
   onClearHistory?: () => void;
   isOpen?: boolean;
@@ -47,6 +50,9 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
   currentRound = 1,
   sessionSeconds = 0,
   totalSeconds = 0,
+  playerName,
+  accountType,
+  isLobbyView = false,
   onOpenPlaytimeScoreboard,
   onClearHistory,
   isOpen: isOpenProp,
@@ -207,12 +213,17 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
             <div className="flex items-center gap-2">
               <BarChart2 className="w-4 h-4 text-emerald-400" />
               <div>
-                <span className="text-[10px] text-white/40 uppercase font-black tracking-widest block">
-                  Painel de Desempenho
+                <span className="text-[10px] text-white/60 uppercase font-black tracking-widest flex items-center gap-1.5">
+                  <span>Desempenho {playerName ? `• ${playerName}` : ''}</span>
+                  {accountType && (
+                    <span className="text-[8px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">
+                      {accountType}
+                    </span>
+                  )}
                 </span>
                 <span className="text-[9px] text-emerald-400 font-bold flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Atualizando a cada rodada (Rodada #{currentRound})
+                  {isLobbyView ? 'Salvo individualmente para esta conta' : `Atualizando a cada rodada (Rodada #${currentRound})`}
                 </span>
               </div>
             </div>
@@ -222,7 +233,7 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
                   type="button"
                   onClick={onClearHistory}
                   className="px-2 py-1 bg-stone-800/80 hover:bg-stone-700 text-stone-400 hover:text-stone-200 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Reiniciar histórico desta sessão"
+                  title="Reiniciar histórico desta conta"
                 >
                   <RotateCcw className="w-3 h-3" />
                   <span>Limpar</span>

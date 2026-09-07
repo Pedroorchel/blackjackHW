@@ -22,6 +22,16 @@ import { StatsDrawer } from './components/StatsDrawer';
 import { calculateHandScore } from './utils/blackjack';
 import { localGameEngine } from './utils/localGameEngine';
 import { 
+  getStoredHandHistory,
+  getStoredBankrollHistory,
+  saveHandHistory,
+  saveBankrollHistory,
+  clearAccountStats,
+  getActiveAccountId,
+  HandHistoryItem,
+  BankrollHistoryItem
+} from './utils/accountStats';
+import { 
   getStoredTotalPlaytime, 
   getStoredLongestSession, 
   getStoredTodayPlaytime, 
@@ -50,6 +60,9 @@ export default function App() {
     return '';
   });
 
+  const [currentUserId, setCurrentUserId] = useState<string>(() => getActiveAccountId());
+  const currentUserIdRef = useRef<string>(getActiveAccountId());
+
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -63,45 +76,13 @@ export default function App() {
   const isLocalModeRef = useRef<boolean>(false);
   const [loanRequests, setLoanRequests] = useState<{ requesterId: string, requesterName: string, amount: number }[]>([]);
 
-  // Performance & bankroll history states
-  const [handHistory, setHandHistory] = useState<{
-    roundNumber: number;
-    outcome: OutcomeType;
-    playerScore: number;
-    dealerScore: number;
-    payout: number;
-    chipsAfter: number;
-    timestamp: number;
-  }[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('blackjack_hand_history');
-        return saved ? JSON.parse(saved) : [];
-      } catch (err) {
-        console.warn('Failed to parse blackjack_hand_history:', err);
-        return [];
-      }
-    }
-    return [];
+  // Account-isolated performance & bankroll history states
+  const [handHistory, setHandHistory] = useState<HandHistoryItem[]>(() => {
+    return getStoredHandHistory(getActiveAccountId());
   });
 
-  const [bankrollHistory, setBankrollHistory] = useState<{
-    roundKey?: string;
-    roundNumber: number;
-    roomId?: string;
-    chips: number;
-    timestamp: number;
-  }[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('blackjack_bankroll_history');
-        return saved ? JSON.parse(saved) : [];
-      } catch (err) {
-        console.warn('Failed to parse blackjack_bankroll_history:', err);
-        return [];
-      }
-    }
-    return [];
+  const [bankrollHistory, setBankrollHistory] = useState<BankrollHistoryItem[]>(() => {
+    return getStoredBankrollHistory(getActiveAccountId());
   });
 
   const lastProcessedRoundRef = useRef<string | null>(null);
@@ -150,12 +131,39 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const res = await fetchAndSyncPlaytimeFromDatabase(session.user.id);
+        const uid = session.user.id;
+        setCurrentUserId(uid);
+        currentUserIdRef.current = uid;
+        setHandHistory(getStoredHandHistory(uid));
+        setBankrollHistory(getStoredBankrollHistory(uid));
+        const res = await fetchAndSyncPlaytimeFromDatabase(uid);
         if (res) {
           setTotalPlaytimeSeconds(res.totalSeconds);
           setLongestSessionSeconds(res.longestSessionSeconds);
-          setTodaySeconds(getStoredTodayPlaytime(session.user.id));
+          setTodaySeconds(getStoredTodayPlaytime(uid));
         }
+      } else {
+        const guestId = getActiveAccountId();
+        setCurrentUserId(guestId);
+        currentUserIdRef.current = guestId;
+        setHandHistory(getStoredHandHistory(guestId));
+        setBankrollHistory(getStoredBankrollHistory(guestId));
+      }
+    });
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const uid = user.id;
+        setCurrentUserId(uid);
+        currentUserIdRef.current = uid;
+        setHandHistory(getStoredHandHistory(uid));
+        setBankrollHistory(getStoredBankrollHistory(uid));
+      } else {
+        const guestId = getActiveAccountId();
+        setCurrentUserId(guestId);
+        currentUserIdRef.current = guestId;
+        setHandHistory(getStoredHandHistory(guestId));
+        setBankrollHistory(getStoredBankrollHistory(guestId));
       }
     });
 
@@ -304,6 +312,24 @@ export default function App() {
                   last_played_at: new Date().toISOString()
                 })
                 .eq('id', user.id);
+            } else {
+              // Guest profile persistence: continually save guest chips, wins and playtime to localStorage
+              if (typeof window !== 'undefined') {
+                const savedGuestRaw = localStorage.getItem('blackjack_guest_profile');
+                let gp = savedGuestRaw ? JSON.parse(savedGuestRaw) : {};
+                gp.name = self.name || gp.name || 'Jogador Convidado';
+                gp.chips = self.chips;
+                gp.wins = self.wins || gp.wins || 0;
+                gp.playtime_seconds = Math.floor(totalPlaytimeRef.current);
+                gp.longest_session_seconds = Math.max(gp.longest_session_seconds || 0, Math.floor(sessionSecondsRef.current));
+                gp.last_played_at = new Date().toISOString();
+
+                localStorage.setItem('blackjack_guest_profile', JSON.stringify(gp));
+                localStorage.setItem('blackjack_guest_chips', String(self.chips));
+                localStorage.setItem('blackjack_guest_wins', String(self.wins || 0));
+                localStorage.setItem('blackjack_player_name', gp.name);
+                persistPlaytime(Math.floor(totalPlaytimeRef.current), Math.floor(sessionSecondsRef.current));
+              }
             }
           };
           syncProfile();
@@ -345,11 +371,7 @@ export default function App() {
             setHandHistory(prev => {
               if (prev.some(h => (h as any).roundKey === roundKey)) return prev;
               const updated = [...prev, newHand].slice(-50);
-              try {
-                localStorage.setItem('blackjack_hand_history', JSON.stringify(updated));
-              } catch (e) {
-                console.error('Error saving hand history:', e);
-              }
+              saveHandHistory(updated, currentUserIdRef.current);
               return updated;
             });
 
@@ -369,11 +391,7 @@ export default function App() {
               }
               updated.push(newBankroll);
               updated = updated.slice(-50);
-              try {
-                localStorage.setItem('blackjack_bankroll_history', JSON.stringify(updated));
-              } catch (e) {
-                console.error('Error saving bankroll history:', e);
-              }
+              saveBankrollHistory(updated, currentUserIdRef.current);
               return updated;
             });
 
@@ -491,11 +509,7 @@ export default function App() {
                 setHandHistory(prev => {
                   if (prev.some(h => (h as any).roundKey === roundKey)) return prev;
                   const updated = [...prev, newHand].slice(-50);
-                  try {
-                    localStorage.setItem('blackjack_hand_history', JSON.stringify(updated));
-                  } catch (e) {
-                    console.error('Error saving hand history:', e);
-                  }
+                  saveHandHistory(updated, currentUserIdRef.current);
                   return updated;
                 });
 
@@ -514,11 +528,7 @@ export default function App() {
                   }
                   updated.push(newBankroll);
                   updated = updated.slice(-50);
-                  try {
-                    localStorage.setItem('blackjack_bankroll_history', JSON.stringify(updated));
-                  } catch (e) {
-                    console.error('Error saving bankroll history:', e);
-                  }
+                  saveBankrollHistory(updated, currentUserIdRef.current);
                   return updated;
                 });
 
@@ -737,6 +747,50 @@ export default function App() {
     }
   };
 
+  const handlePlayWithBots = async (name: string, wins?: number, chips?: number) => {
+    setIsConnecting(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetchAndSyncPlaytimeFromDatabase();
+      if (res) {
+        setTotalPlaytimeSeconds(res.totalSeconds);
+        setLongestSessionSeconds(res.longestSessionSeconds);
+      }
+    } catch (e) {
+      console.warn('Playtime room sync:', e);
+    }
+    isLocalModeRef.current = true;
+    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    setIsConnecting(false);
+  };
+
+  const handleAddBot = () => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current || !socket?.connected) {
+      localGameEngine.addBot();
+    } else {
+      socket.emit('room:add_bot');
+    }
+  };
+
+  const handleRemoveBot = (botId?: string) => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current || !socket?.connected) {
+      localGameEngine.removeBot(botId);
+    } else {
+      socket.emit('room:remove_bot', { botId });
+    }
+  };
+
+  const handleToggleBots = () => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current || !socket?.connected) {
+      localGameEngine.toggleBots();
+    } else {
+      socket.emit('room:toggle_bots');
+    }
+  };
+
   const handleJoinRoom = async (roomId: string, name: string, wins?: number, chips?: number) => {
     setIsConnecting(true);
     setErrorMessage(null);
@@ -794,12 +848,7 @@ export default function App() {
   const handleClearStats = () => {
     setHandHistory([]);
     setBankrollHistory([]);
-    try {
-      localStorage.removeItem('blackjack_hand_history');
-      localStorage.removeItem('blackjack_bankroll_history');
-    } catch (e) {
-      console.error('Error clearing stats:', e);
-    }
+    clearAccountStats(currentUserIdRef.current);
   };
 
   const handleStartDeal = () => {
@@ -881,6 +930,7 @@ export default function App() {
           onUpdatePlayerName={handleUpdatePlayerName}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onPlayWithBots={handlePlayWithBots}
           onOpenRules={() => setIsRulesOpen(true)}
           onOpenSetup={() => setIsSetupOpen(true)}
           errorMessage={errorMessage}
@@ -963,6 +1013,22 @@ export default function App() {
           </button>
 
           <div className="flex items-center gap-2 ml-auto">
+            {/* Bot Controls Quick Badge in Header */}
+            <div className="flex items-center gap-1.5 bg-cyan-950/70 border border-cyan-500/40 px-2.5 py-1 rounded-xl text-[11px] font-bold text-cyan-300 shadow">
+              <span className="text-xs">🤖</span>
+              <span className="hidden sm:inline">Bots:</span>
+              <span className="text-white font-mono font-black">{roomState.players.filter(p => p.isBot).length}</span>
+              <button
+                type="button"
+                id="btn-header-toggle-bots"
+                onClick={handleToggleBots}
+                className="ml-1 text-[10px] bg-cyan-800/70 hover:bg-cyan-700 active:bg-cyan-600 px-2 py-0.5 rounded-lg border border-cyan-400/40 text-white cursor-pointer font-bold transition-colors"
+                title="Alternar/Adicionar Bots na Mesa"
+              >
+                {roomState.players.filter(p => p.isBot).length > 0 ? 'Limpar' : '+ Bots'}
+              </button>
+            </div>
+
             {/* Players List Button */}
             <button
               type="button"
@@ -1183,6 +1249,8 @@ export default function App() {
             isHost={isHost}
             phase={roomState.phase}
             canStartDeal={canStartDeal}
+            botsCount={roomState.players.filter(p => p.isBot).length}
+            maxBots={Math.max(0, 7 - roomState.players.filter(p => !p.isBot && !p.isSpectator).length)}
             onBetChange={handleBetChange}
             onReadyToggle={handleReadyToggle}
             onStartDeal={handleStartDeal}
@@ -1190,6 +1258,9 @@ export default function App() {
             onStand={handleStand}
             onDouble={handleDouble}
             onNewRound={handleNewRound}
+            onAddBot={handleAddBot}
+            onRemoveBot={handleRemoveBot}
+            onToggleBots={handleToggleBots}
           />
         )}
       </footer>
@@ -1208,6 +1279,8 @@ export default function App() {
         currentRound={roomState.roundNumber}
         sessionSeconds={sessionSeconds}
         totalSeconds={totalPlaytimeSeconds}
+        playerName={selfPlayer?.name || playerName}
+        accountType={currentUserId?.startsWith('guest_') ? 'Conta Convidado' : 'Conta Cadastrada'}
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         onToggle={() => setIsStatsOpen(prev => !prev)}
@@ -1274,6 +1347,10 @@ export default function App() {
           onOpenPlaytimeScoreboard={() => {
             setSelectedProfilePlayer(null);
             setIsPlaytimeScoreboardOpen(true);
+          }}
+          onOpenStats={() => {
+            setSelectedProfilePlayer(null);
+            setIsStatsOpen(true);
           }}
         />
       )}

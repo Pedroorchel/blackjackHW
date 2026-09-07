@@ -317,7 +317,7 @@ io.on('connection', (socket: Socket) => {
       id: socket.id,
       name: playerName.trim() || 'Jogador 1',
       chips: typeof chips === 'number' ? Math.min(250000, chips) : 500,
-      currentBet: 25,
+      currentBet: 0,
       cards: [],
       status: 'betting',
       outcome: null,
@@ -391,7 +391,7 @@ io.on('connection', (socket: Socket) => {
       id: socket.id,
       name: playerName.trim() || `Jogador ${room.players.length + 1}`,
       chips: isSpectator ? 0 : (typeof chips === 'number' ? Math.min(250000, chips) : 500),
-      currentBet: isSpectator ? 0 : 25,
+      currentBet: 0,
       cards: [],
       status: isSpectator ? 'spectator' : (room.phase === 'betting' ? 'betting' : 'waiting'),
       outcome: null,
@@ -482,7 +482,7 @@ io.on('connection', (socket: Socket) => {
 
     const player = room.players.find(p => p.id === socket.id);
     if (player && !player.isSpectator) {
-      const validAmount = Math.max(10, Math.min(amount, player.chips));
+      const validAmount = Math.max(0, Math.min(amount, player.chips));
       player.currentBet = validAmount;
       broadcastRoom(currentRoomId);
     }
@@ -702,11 +702,17 @@ io.on('connection', (socket: Socket) => {
     advanceTurn(room);
   });
 
-  // New Round
+  // New Round - Host only
   socket.on('game:new_round', () => {
     if (!currentRoomId) return;
     const room = rooms.get(currentRoomId);
     if (!room || room.phase !== 'round_over') return;
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player || !player.isHost) {
+      socket.emit('room:error', { message: 'Apenas o Criador da Sala pode iniciar a nova rodada!' });
+      return;
+    }
 
     if (room.dealerTimer) {
       clearTimeout(room.dealerTimer);
