@@ -79,7 +79,9 @@ export default function App() {
   });
 
   const [bankrollHistory, setBankrollHistory] = useState<{
+    roundKey?: string;
     roundNumber: number;
+    roomId?: string;
     chips: number;
     timestamp: number;
   }[]>(() => {

@@ -1005,6 +1005,8 @@ export const Lobby: React.FC<LobbyProps> = ({
             status: 'waiting',
             outcome: null,
             payout: 0,
+            currentBet: 0,
+            cards: [],
             isHost: false,
             isReady: false,
             seatIndex: 0,

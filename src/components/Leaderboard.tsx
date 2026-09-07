@@ -92,7 +92,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ players }) => {
                         {player.name}
                       </span>
                       {idx === 0 && (
-                        <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0 fill-yellow-400/20 animate-pulse" title="Líder do Pódio" />
+                        <span title="Líder do Pódio">
+                          <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0 fill-yellow-400/20 animate-pulse" />
+                        </span>
                       )}
                     </div>
 
