@@ -20,6 +20,7 @@ import { PlaytimeScoreboardModal } from './components/PlaytimeScoreboardModal';
 import { Player } from './types';
 import { StatsDrawer } from './components/StatsDrawer';
 import { calculateHandScore } from './utils/blackjack';
+import { localGameEngine } from './utils/localGameEngine';
 import { 
   getStoredTotalPlaytime, 
   getStoredLongestSession, 
@@ -59,6 +60,7 @@ export default function App() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [isMuted, setIsMuted] = useState(sounds.isMuted());
   const [isConnecting, setIsConnecting] = useState(false);
+  const isLocalModeRef = useRef<boolean>(false);
   const [loanRequests, setLoanRequests] = useState<{ requesterId: string, requesterName: string, amount: number }[]>([]);
 
   // Performance & bankroll history states
@@ -444,10 +446,178 @@ export default function App() {
     };
   }, []);
 
+  // Local game engine subscription for offline / standalone mode
+  useEffect(() => {
+    const unsub = localGameEngine.subscribe({
+      onState: (state) => {
+        if (isLocalModeRef.current) {
+          setRoomState(state);
+          setIsConnecting(false);
+
+          if (state.phase === 'round_over') {
+            const self = state.players.find(p => p.id === 'local-player') || state.players[0];
+            if (self && !self.isSpectator) {
+              const roundKey = `${state.roomId}_r${state.roundNumber}_${state.dealer.score}_${self.cards.length}`;
+
+              if (lastProcessedRoundRef.current !== roundKey) {
+                const pScore = calculateHandScore(self.cards).total;
+                const dScore = calculateHandScore(state.dealer.cards).total;
+                const currentBet = self.currentBet || 0;
+                const payout = self.payout || 0;
+                const profit = payout - currentBet;
+
+                const newHand = {
+                  roundKey,
+                  roundNumber: state.roundNumber,
+                  roomId: state.roomId,
+                  outcome: self.outcome,
+                  playerScore: pScore,
+                  dealerScore: dScore,
+                  bet: currentBet,
+                  payout: payout,
+                  profit: profit,
+                  chipsAfter: self.chips,
+                  timestamp: Date.now()
+                };
+
+                const newBankroll = {
+                  roundKey,
+                  roundNumber: state.roundNumber,
+                  roomId: state.roomId,
+                  chips: self.chips,
+                  timestamp: Date.now()
+                };
+
+                setHandHistory(prev => {
+                  if (prev.some(h => (h as any).roundKey === roundKey)) return prev;
+                  const updated = [...prev, newHand].slice(-50);
+                  try {
+                    localStorage.setItem('blackjack_hand_history', JSON.stringify(updated));
+                  } catch (e) {
+                    console.error('Error saving hand history:', e);
+                  }
+                  return updated;
+                });
+
+                setBankrollHistory(prev => {
+                  if (prev.some(b => (b as any).roundKey === roundKey)) return prev;
+                  let updated = [...prev];
+                  if (updated.length === 0) {
+                    const previousChips = self.chips - profit;
+                    updated.push({
+                      roundKey: `${state.roomId}_r${state.roundNumber}_start`,
+                      roundNumber: Math.max(0, state.roundNumber - 1),
+                      roomId: state.roomId,
+                      chips: previousChips,
+                      timestamp: Date.now() - 1000
+                    });
+                  }
+                  updated.push(newBankroll);
+                  updated = updated.slice(-50);
+                  try {
+                    localStorage.setItem('blackjack_bankroll_history', JSON.stringify(updated));
+                  } catch (e) {
+                    console.error('Error saving bankroll history:', e);
+                  }
+                  return updated;
+                });
+
+                lastProcessedRoundRef.current = roundKey;
+              }
+
+              if (self.outcome === 'win' || self.outcome === 'blackjack') {
+                try {
+                  confetti({
+                    particleCount: 60,
+                    spread: 70,
+                    origin: { y: 0.7 }
+                  });
+                } catch {
+                  // Ignore confetti errors if any
+                }
+              }
+            }
+          }
+        }
+      },
+      onEvent: ({ type }) => {
+        if (!isLocalModeRef.current) return;
+        switch (type) {
+          case 'deal':
+          case 'hit':
+          case 'dealer_hit':
+            sounds.playCardDeal();
+            break;
+          case 'dealer_flip':
+            sounds.playCardFlip();
+            break;
+          case 'bust':
+            sounds.playBust();
+            break;
+          case 'blackjack':
+            sounds.playBlackjack();
+            break;
+          case 'round_over':
+          case 'win':
+          case 'loan':
+            sounds.playWin();
+            break;
+        }
+      }
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Self player & active player memo
+  const isSelf = useCallback((playerId: string) => {
+    if (isLocalModeRef.current || !socket?.connected) {
+      return playerId === 'local-player' || playerId === roomState?.players[0]?.id;
+    }
+    return playerId === socket?.id;
+  }, [roomState]);
+
+  const selfPlayer = useMemo(() => {
+    if (!roomState) return null;
+    if (isLocalModeRef.current || !socket?.connected) {
+      return roomState.players.find(p => p.id === 'local-player') || roomState.players[0] || null;
+    }
+    return roomState.players.find(p => p.id === socket?.id) || roomState.players[0] || null;
+  }, [roomState]);
+
+  const activePlayer = useMemo(() => {
+    if (!roomState || !roomState.activePlayerId) return null;
+    return roomState.players.find(p => p.id === roomState.activePlayerId) || null;
+  }, [roomState]);
+
+  const isHost = selfPlayer?.isHost ?? false;
+  const canStartDeal = isHost && 
+    roomState?.phase === 'betting' && 
+    roomState.players.filter(p => !p.isSpectator).every(p => p.isReady || p.chips === 0);
+
+  const handleBetChange = (amount: number) => {
+    if (isLocalModeRef.current) {
+      localGameEngine.setBet('local-player', amount);
+      return;
+    }
+    if (!socket) return;
+    socket.emit('player:bet', { amount });
+  };
+
+  const handleReadyToggle = () => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current) {
+      localGameEngine.toggleReady('local-player');
+      return;
+    }
+    if (!socket) return;
+    socket.emit('player:ready');
+  };
+
   // Auto-Ready Effect
   useEffect(() => {
-    if (!roomState || !socket || !autoReady) return;
-    const self = roomState.players.find(p => p.id === socket?.id);
+    if (!roomState || !autoReady) return;
+    const self = selfPlayer;
     // If it's betting phase, and I'm not ready, and I'm supposed to be betting, auto-ready
     if (
       roomState.phase === 'betting' &&
@@ -456,14 +626,13 @@ export default function App() {
       !self.isReady &&
       self.chips > 0
     ) {
-      // Add a small delay so it doesn't look instantly robotic, allowing users to see they've been readied
       const timer = setTimeout(() => {
         sounds.playChipBet();
-        socket?.emit('player:ready');
+        handleReadyToggle();
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [roomState?.phase, roomState?.roundNumber, autoReady, socket]);
+  }, [roomState?.phase, roomState?.roundNumber, autoReady, selfPlayer]);
 
   const handleRespondLoan = (requesterId: string, accept: boolean, amount: number) => {
     if (!socket) return;
@@ -519,14 +688,14 @@ export default function App() {
       socket.emit('player:update_profile', { name, avatarUrl: finalAvatar });
     }
 
-    if (selectedProfilePlayer && selectedProfilePlayer.id === socket?.id) {
+    if (selectedProfilePlayer && isSelf(selectedProfilePlayer.id)) {
       setSelectedProfilePlayer(prev => prev ? { ...prev, name, avatarUrl: finalAvatar } : null);
     }
   };
 
   const handleCreateRoom = async (name: string, wins?: number, chips?: number) => {
-    if (!socket) return;
     setIsConnecting(true);
+    setErrorMessage(null);
     try {
       const res = await fetchAndSyncPlaytimeFromDatabase();
       if (res) {
@@ -536,17 +705,41 @@ export default function App() {
     } catch (e) {
       console.warn('Playtime room sync:', e);
     }
-    socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
+
+    if (socket && socket.connected) {
+      let resolved = false;
+      const fallbackTimer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl);
+          setIsConnecting(false);
+        }
+      }, 1500);
+
+      socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallbackTimer);
+        setIsConnecting(false);
+        if (res.success) {
+          isLocalModeRef.current = false;
+        } else {
+          // Fallback to local table if server rejected or errored
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl);
+        }
+      });
+    } else {
+      isLocalModeRef.current = true;
+      localGameEngine.createRoom(name, wins, chips, avatarUrl);
       setIsConnecting(false);
-      if (!res.success) {
-        setErrorMessage(res.error || 'Erro ao criar sala.');
-      }
-    });
+    }
   };
 
   const handleJoinRoom = async (roomId: string, name: string, wins?: number, chips?: number) => {
-    if (!socket) return;
     setIsConnecting(true);
+    setErrorMessage(null);
     try {
       const res = await fetchAndSyncPlaytimeFromDatabase();
       if (res) {
@@ -556,19 +749,43 @@ export default function App() {
     } catch (e) {
       console.warn('Playtime room sync:', e);
     }
-    socket.emit('room:join', { roomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
+
+    if (socket && socket.connected) {
+      let resolved = false;
+      const fallbackTimer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId);
+          setIsConnecting(false);
+        }
+      }, 1500);
+
+      socket.emit('room:join', { roomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallbackTimer);
+        setIsConnecting(false);
+        if (res.success) {
+          isLocalModeRef.current = false;
+        } else {
+          setErrorMessage(res.error || 'Erro ao entrar na sala.');
+        }
+      });
+    } else {
+      isLocalModeRef.current = true;
+      localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId);
       setIsConnecting(false);
-      if (!res.success) {
-        setErrorMessage(res.error || 'Erro ao entrar na sala.');
-      }
-    });
+    }
   };
 
   const handleLeaveRoom = () => {
     persistPlaytime(totalPlaytimeSeconds, sessionSeconds);
     syncPlaytimeToDatabase(totalPlaytimeSeconds, sessionSeconds, true);
-    if (!socket) return;
-    socket.emit('room:leave');
+    if (socket && !isLocalModeRef.current) {
+      socket.emit('room:leave');
+    }
+    isLocalModeRef.current = false;
     setRoomState(null);
     setSessionSeconds(0);
     lastProcessedRoundRef.current = null;
@@ -585,45 +802,59 @@ export default function App() {
     }
   };
 
-  const handleBetChange = (amount: number) => {
-    if (!socket) return;
-    socket.emit('player:bet', { amount });
-  };
-
-  const handleReadyToggle = () => {
-    if (!socket) return;
-    sounds.playChipBet();
-    socket.emit('player:ready');
-  };
-
   const handleStartDeal = () => {
-    if (!socket) return;
     sounds.playCardDeal();
+    if (isLocalModeRef.current) {
+      localGameEngine.startDeal();
+      return;
+    }
+    if (!socket) return;
     socket.emit('game:start_deal');
   };
 
   const handleHit = () => {
+    sounds.playCardDeal();
+    if (isLocalModeRef.current) {
+      localGameEngine.hit('local-player');
+      return;
+    }
     if (!socket) return;
     socket.emit('player:hit');
   };
 
   const handleStand = () => {
+    if (isLocalModeRef.current) {
+      localGameEngine.stand('local-player');
+      return;
+    }
     if (!socket) return;
     socket.emit('player:stand');
   };
 
   const handleDouble = () => {
-    if (!socket) return;
     sounds.playChipBet();
+    if (isLocalModeRef.current) {
+      localGameEngine.double('local-player');
+      return;
+    }
+    if (!socket) return;
     socket.emit('player:double');
   };
 
   const handleNewRound = () => {
+    if (isLocalModeRef.current) {
+      localGameEngine.newRound();
+      return;
+    }
     if (!socket) return;
     socket.emit('game:new_round');
   };
 
   const handleSendMessage = (text: string) => {
+    if (isLocalModeRef.current) {
+      localGameEngine.sendMessage(selfPlayer?.name || playerName, text);
+      return;
+    }
     if (!socket) return;
     socket.emit('chat:send', { text });
   };
@@ -640,22 +871,6 @@ export default function App() {
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2500);
   };
-
-  // Self player & active player
-  const selfPlayer = useMemo(() => {
-    if (!roomState || !socket) return null;
-    return roomState.players.find(p => p.id === socket?.id) || null;
-  }, [roomState]);
-
-  const activePlayer = useMemo(() => {
-    if (!roomState || !roomState.activePlayerId) return null;
-    return roomState.players.find(p => p.id === roomState.activePlayerId) || null;
-  }, [roomState]);
-
-  const isHost = selfPlayer?.isHost ?? false;
-  const canStartDeal = isHost && 
-    roomState?.phase === 'betting' && 
-    roomState.players.filter(p => !p.isSpectator).every(p => p.isReady || p.chips === 0);
 
   // If not inside a room, render the Lobby
   if (!roomState) {
@@ -895,7 +1110,7 @@ export default function App() {
                   <div key={player.id} className={`w-full flex justify-center transition-transform ${arcOffsetClass}`}>
                     <PlayerSeat
                       player={player}
-                      isSelf={player.id === socket?.id}
+                      isSelf={isSelf(player.id)}
                       selfPlayer={selfPlayer}
                       isActiveTurn={roomState.activePlayerId === player.id}
                       phase={roomState.phase}
@@ -1040,7 +1255,7 @@ export default function App() {
           isOpen={isPlayerListOpen}
           onClose={() => setIsPlayerListOpen(false)}
           players={roomState.players}
-          selfPlayerId={socket?.id || ''}
+          selfPlayerId={selfPlayer?.id || socket?.id || ''}
           activePlayerId={roomState.activePlayerId}
           onSelectPlayer={(p) => {
             setSelectedProfilePlayer(p);
@@ -1053,9 +1268,9 @@ export default function App() {
         <PlayerProfileModal 
           player={selectedProfilePlayer} 
           onClose={() => setSelectedProfilePlayer(null)} 
-          isSelf={selectedProfilePlayer.id === socket?.id}
+          isSelf={isSelf(selectedProfilePlayer.id)}
           onUpdateProfile={handleUpdateProfile}
-          playtimeSeconds={selectedProfilePlayer.id === socket?.id ? totalPlaytimeSeconds : undefined}
+          playtimeSeconds={isSelf(selectedProfilePlayer.id) ? totalPlaytimeSeconds : undefined}
           onOpenPlaytimeScoreboard={() => {
             setSelectedProfilePlayer(null);
             setIsPlaytimeScoreboardOpen(true);

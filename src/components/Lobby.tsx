@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Spade, Heart, Diamond, Club, PlusCircle, LogIn, Sparkles, BookOpen, Terminal, Users, Eye, Coins, Zap, ChevronDown, Edit2, Clock } from 'lucide-react';
+import { Spade, Heart, Diamond, Club, PlusCircle, LogIn, Sparkles, BookOpen, Terminal, Users, Eye, Coins, Zap, ChevronDown, Edit2, Clock, User } from 'lucide-react';
 import { motion } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { PlayerProfileModal } from './PlayerProfileModal';
@@ -272,6 +272,20 @@ export const Lobby: React.FC<LobbyProps> = ({
       setIsGoogleLoading(false);
       setLocalError(err.message || 'Falha ao autenticar com o Google.');
     }
+  };
+
+  const handleGuestLogin = () => {
+    const guestName = name.trim() || 'Jogador Convidado';
+    setName(guestName);
+    onUpdatePlayerName(guestName);
+    const guestProfile = {
+      id: 'guest-' + Date.now(),
+      name: guestName,
+      wins: 0,
+      chips: 1000
+    };
+    setUserProfile(guestProfile);
+    setStep('room');
   };
 
   const handleNameBlur = () => {
@@ -776,6 +790,17 @@ export const Lobby: React.FC<LobbyProps> = ({
                         <GoogleIcon />
                       )}
                       <span>{isGoogleLoading ? 'Conectando ao Google...' : 'Entrar com o Google'}</span>
+                    </button>
+
+                    {/* Guest Login Option */}
+                    <button
+                      id="guest-login-btn"
+                      type="button"
+                      onClick={handleGuestLogin}
+                      className="w-full mt-3 py-3.5 px-6 rounded-xl font-bold text-sm bg-stone-800/90 hover:bg-stone-700 active:bg-stone-600 text-stone-200 border border-stone-700 hover:border-amber-500/40 shadow-md flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 cursor-pointer"
+                    >
+                      <User className="w-5 h-5 text-amber-400" />
+                      <span>Jogar como Convidado (Sem Cadastro)</span>
                     </button>
 
                     <div className="mt-8 text-center">
