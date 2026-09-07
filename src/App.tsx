@@ -809,8 +809,7 @@ export default function App() {
       const fallbackTimer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId);
+          setErrorMessage('Não foi possível conectar ao servidor Multiplayer. Você está no modo offline.');
           setIsConnecting(false);
         }
       }, 8000);
@@ -827,8 +826,7 @@ export default function App() {
         }
       });
     } else {
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId);
+      setErrorMessage('Você está desconectado do servidor. O modo Multiplayer não está disponível neste ambiente (ex: GitHub Pages).');
       setIsConnecting(false);
     }
   };
