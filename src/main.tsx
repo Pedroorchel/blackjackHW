@@ -11,3 +11,7 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__REACT_APP_MOUNTED__ = true;
+}
