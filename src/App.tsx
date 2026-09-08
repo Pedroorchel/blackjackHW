@@ -251,17 +251,65 @@ export default function App() {
     }
   };
 
+  const [isServerConnected, setIsServerConnected] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('blackjack_custom_server_url') || '';
+    }
+    return '';
+  });
+
+  const getSocketServerUrl = (overrideUrl?: string) => {
+    if (typeof window === 'undefined') return undefined;
+    const custom = overrideUrl !== undefined ? overrideUrl : (localStorage.getItem('blackjack_custom_server_url')?.trim() || '');
+    if (custom) return custom;
+
+    const isStaticHost = window.location.hostname.includes('github.io') ||
+                         window.location.hostname.includes('netlify') ||
+                         window.location.hostname.includes('vercel') ||
+                         window.location.hostname.includes('pages.dev');
+
+    if (isStaticHost) {
+      return 'https://ais-dev-jmdx2zcehkmkehmm7m4erp-791084157184.us-east1.run.app';
+    }
+
+    return undefined;
+  };
+
+  const handleSaveServerUrl = (url: string) => {
+    setCustomServerUrl(url);
+    if (typeof window !== 'undefined') {
+      if (url) {
+        localStorage.setItem('blackjack_custom_server_url', url);
+      } else {
+        localStorage.removeItem('blackjack_custom_server_url');
+      }
+    }
+  };
+
   // Initialize socket connection
   useEffect(() => {
-    socket = io({
-      transports: ['websocket', 'polling']
+    if (socket) {
+      socket.disconnect();
+    }
+
+    const serverUrl = getSocketServerUrl(customServerUrl);
+    socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000
     });
 
     socket.on('connect', () => {
-      // connected
+      setIsServerConnected(true);
+    });
+
+    socket.on('disconnect', () => {
+      setIsServerConnected(false);
     });
 
     socket.on('connect_error', (err) => {
+      setIsServerConnected(false);
       console.warn('Socket connection note (server offline or static mode):', err?.message || err);
     });
 
@@ -940,9 +988,18 @@ export default function App() {
             setTotalPlaytimeSeconds(seconds);
             totalPlaytimeRef.current = seconds;
           }}
+          isServerConnected={isServerConnected}
+          customServerUrl={customServerUrl}
+          onSaveServerUrl={handleSaveServerUrl}
         />
         <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
-        <LocalSetupModal isOpen={isSetupOpen} onClose={() => setIsSetupOpen(false)} />
+        <LocalSetupModal 
+          isOpen={isSetupOpen} 
+          onClose={() => setIsSetupOpen(false)}
+          customServerUrl={customServerUrl}
+          onSaveServerUrl={handleSaveServerUrl}
+          isServerConnected={isServerConnected}
+        />
       </>
     );
   }
@@ -1315,7 +1372,13 @@ export default function App() {
 
       {/* 6. MODALS */}
       <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
-      <LocalSetupModal isOpen={isSetupOpen} onClose={() => setIsSetupOpen(false)} />
+      <LocalSetupModal 
+        isOpen={isSetupOpen} 
+        onClose={() => setIsSetupOpen(false)}
+        customServerUrl={customServerUrl}
+        onSaveServerUrl={handleSaveServerUrl}
+        isServerConnected={isServerConnected}
+      />
       <SettingsModal 
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)} 

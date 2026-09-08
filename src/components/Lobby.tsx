@@ -54,6 +54,9 @@ interface LobbyProps {
   errorMessage?: string | null;
   isConnecting?: boolean;
   onPlaytimeSync?: (totalSeconds: number) => void;
+  isServerConnected?: boolean;
+  customServerUrl?: string;
+  onSaveServerUrl?: (url: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -66,7 +69,10 @@ export const Lobby: React.FC<LobbyProps> = ({
   onOpenSetup,
   errorMessage,
   isConnecting = false,
-  onPlaytimeSync
+  onPlaytimeSync,
+  isServerConnected = false,
+  customServerUrl = '',
+  onSaveServerUrl
 }) => {
   const [name, setName] = useState(playerName);
   const [email, setEmail] = useState('');
@@ -718,6 +724,20 @@ export const Lobby: React.FC<LobbyProps> = ({
                     )}
                   </p>
                 </div>
+                <div 
+                  onClick={onOpenSetup}
+                  className="cursor-pointer group bg-black/40 hover:bg-black/60 border border-stone-800 hover:border-amber-500/50 px-3 py-1.5 rounded-xl transition-all shadow-md flex items-center gap-2 shrink-0"
+                  title="Clique para ver ou configurar o Servidor Multiplayer"
+                >
+                  <span className={`w-2 h-2 rounded-full ${isServerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  <div className="text-left">
+                    <p className="text-[8px] uppercase font-bold text-stone-500 tracking-wider">Servidor</p>
+                    <p className={`text-[10px] font-black uppercase tracking-wider ${isServerConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {isServerConnected ? 'Multiplayer ON' : 'Config. Servidor'}
+                    </p>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleLogout}
