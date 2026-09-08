@@ -78,8 +78,22 @@ export interface TableChatMessage {
   isSystem?: boolean;
 }
 
+export interface RoomSummary {
+  roomId: string;
+  name: string;
+  isPublic: boolean;
+  totalPlayers: number;
+  seatedCount: number;
+  spectatorCount: number;
+  maxSeats: number;
+  phase: RoundPhase;
+  roundNumber: number;
+}
+
 export interface RoomState {
   roomId: string;
+  name?: string;
+  isPublic?: boolean;
   hostId: string;
   phase: RoundPhase;
   players: Player[];
@@ -95,6 +109,13 @@ export interface RoomState {
 export interface ClientToServerEvents {
   'room:create': (payload: { playerName: string; wins?: number; chips?: number; avatarUrl?: string }, callback: (res: { success: boolean; roomId?: string; error?: string }) => void) => void;
   'room:join': (payload: { roomId: string; playerName: string; wins?: number; chips?: number; avatarUrl?: string }, callback: (res: { success: boolean; error?: string }) => void) => void;
+  'rooms:get_list': () => void;
+  'rooms:quick_play': (payload: { playerName: string; wins?: number; chips?: number; avatarUrl?: string }, callback: (res: { success: boolean; roomId?: string; error?: string }) => void) => void;
+  'player:take_seat': (payload: { seatIndex: number }, callback?: (res: { success: boolean; error?: string }) => void) => void;
+  'player:stand_up': () => void;
+  'room:add_bot': () => void;
+  'room:remove_bot': (payload?: { botId?: string }) => void;
+  'room:toggle_bots': () => void;
   'room:leave': () => void;
   'player:update_name': (payload: { name: string }) => void;
   'player:update_profile': (payload: { name: string; avatarUrl?: string }) => void;
@@ -113,6 +134,7 @@ export interface ClientToServerEvents {
 
 export interface ServerToClientEvents {
   'room:state': (state: RoomState) => void;
+  'rooms:list': (rooms: RoomSummary[]) => void;
   'room:error': (payload: { message: string }) => void;
   'game:event': (payload: { type: 'deal' | 'hit' | 'stand' | 'bust' | 'blackjack' | 'dealer_hit' | 'dealer_flip' | 'round_end' | 'loan'; message: string }) => void;
   'chat:message': (message: TableChatMessage) => void;

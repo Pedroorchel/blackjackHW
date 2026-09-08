@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { io, Socket } from 'socket.io-client';
 import confetti from 'canvas-confetti';
 import { supabase } from './lib/supabase';
-import { RoomState, TableChatMessage, OutcomeType } from './types';
+import { RoomState, TableChatMessage, OutcomeType, RoomSummary } from './types';
 import { sounds } from './utils/audio';
 import { Lobby } from './components/Lobby';
 import { DealerArea } from './components/DealerArea';
@@ -252,6 +252,7 @@ export default function App() {
   };
 
   const [isServerConnected, setIsServerConnected] = useState(false);
+  const [roomsList, setRoomsList] = useState<RoomSummary[]>([]);
   const [customServerUrl, setCustomServerUrl] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('blackjack_custom_server_url') || '';
@@ -295,17 +296,30 @@ export default function App() {
 
     const serverUrl = getSocketServerUrl(customServerUrl);
     socket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000
     });
 
     socket.on('connect', () => {
       setIsServerConnected(true);
+      socket?.emit('rooms:get_list');
     });
 
     socket.on('disconnect', () => {
       setIsServerConnected(false);
+    });
+
+    socket.on('room:error', (err: { message: string }) => {
+      if (err?.message) {
+        setErrorMessage(err.message);
+      }
+    });
+
+    socket.on('rooms:list', (list: RoomSummary[]) => {
+      if (Array.isArray(list)) {
+        setRoomsList(list);
+      }
     });
 
     socket.on('connect_error', (err) => {
@@ -752,9 +766,53 @@ export default function App() {
     }
   };
 
+  const ensureSocketConnected = async (timeoutMs: number = 6000): Promise<boolean> => {
+    if (socket && socket.connected) return true;
+    if (!socket) {
+      const serverUrl = getSocketServerUrl(customServerUrl);
+      socket = io(serverUrl, {
+        transports: ['polling', 'websocket'],
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
+      });
+    }
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve(socket?.connected || false);
+        }
+      }, timeoutMs);
+
+      const onConnect = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          socket?.off('connect', onConnect);
+          resolve(true);
+        }
+      };
+
+      if (socket.connected) {
+        clearTimeout(timer);
+        resolve(true);
+      } else {
+        socket.once('connect', onConnect);
+      }
+    });
+  };
+
   const handleCreateRoom = async (name: string, wins?: number, chips?: number) => {
     setIsConnecting(true);
     setErrorMessage(null);
+    handleUpdatePlayerName(name);
+
     try {
       const res = await fetchAndSyncPlaytimeFromDatabase();
       if (res) {
@@ -765,33 +823,19 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    if (socket && socket.connected) {
-      let resolved = false;
-      const fallbackTimer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
-          setIsConnecting(false);
-        }
-      }, 5000);
-
+    const isConnected = await ensureSocketConnected();
+    if (isConnected && socket && socket.connected) {
       socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(fallbackTimer);
         setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
         } else {
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
+          setErrorMessage(res?.error || 'Erro ao criar a sala no servidor.');
         }
       });
     } else {
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
       setIsConnecting(false);
+      setErrorMessage('Não foi possível conectar ao servidor multiplayer online. Verifique sua conexão e tente novamente.');
     }
   };
 
@@ -842,6 +886,17 @@ export default function App() {
   const handleJoinRoom = async (roomId: string, name: string, wins?: number, chips?: number) => {
     setIsConnecting(true);
     setErrorMessage(null);
+    handleUpdatePlayerName(name);
+
+    let cleanRoomId = roomId.trim().toUpperCase();
+    if (cleanRoomId.includes('ROOM=')) {
+      const match = cleanRoomId.match(/ROOM=([A-Z0-9]+)/i);
+      if (match) cleanRoomId = match[1].toUpperCase();
+    }
+    if (cleanRoomId.startsWith('#')) {
+      cleanRoomId = cleanRoomId.substring(1);
+    }
+
     try {
       const res = await fetchAndSyncPlaytimeFromDatabase();
       if (res) {
@@ -852,33 +907,50 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    if (socket && socket.connected) {
-      let resolved = false;
-      const fallbackTimer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId, 0);
-          setIsConnecting(false);
-        }
-      }, 5000);
-
-      socket.emit('room:join', { roomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(fallbackTimer);
+    const isConnected = await ensureSocketConnected();
+    if (isConnected && socket && socket.connected) {
+      socket.emit('room:join', { roomId: cleanRoomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
         setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
         } else {
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId, 0);
+          setErrorMessage(res?.error || `Mesa "${cleanRoomId}" não encontrada. Verifique se o código está correto e se o host ainda está com a mesa aberta.`);
         }
       });
     } else {
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, roomId, 0);
       setIsConnecting(false);
+      setErrorMessage('Não foi possível conectar ao servidor multiplayer online. Verifique sua conexão e tente novamente.');
+    }
+  };
+
+  const handleQuickPlay = async (name: string, wins?: number, chips?: number) => {
+    setIsConnecting(true);
+    setErrorMessage(null);
+    handleUpdatePlayerName(name);
+
+    try {
+      const res = await fetchAndSyncPlaytimeFromDatabase();
+      if (res) {
+        setTotalPlaytimeSeconds(res.totalSeconds);
+        setLongestSessionSeconds(res.longestSessionSeconds);
+      }
+    } catch (e) {
+      console.warn('Playtime room sync:', e);
+    }
+
+    const isConnected = await ensureSocketConnected();
+    if (isConnected && socket && socket.connected) {
+      socket.emit('rooms:quick_play', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
+        setIsConnecting(false);
+        if (res && res.success) {
+          isLocalModeRef.current = false;
+        } else {
+          setErrorMessage(res?.error || 'Nenhuma mesa multiplayer disponível no momento.');
+        }
+      });
+    } else {
+      setIsConnecting(false);
+      setErrorMessage('Não foi possível conectar ao servidor multiplayer online.');
     }
   };
 

@@ -601,10 +601,18 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomCode.trim()) return;
+    let cleanCode = roomCode.trim().toUpperCase();
+    if (cleanCode.includes('ROOM=')) {
+      const match = cleanCode.match(/ROOM=([A-Z0-9]+)/i);
+      if (match) cleanCode = match[1].toUpperCase();
+    }
+    if (cleanCode.startsWith('#')) {
+      cleanCode = cleanCode.substring(1);
+    }
+    if (!cleanCode) return;
     const finalName = name.trim() || 'Jogador';
     onUpdatePlayerName(finalName);
-    onJoinRoom(roomCode.trim().toUpperCase(), finalName, userProfile?.wins, userProfile?.chips);
+    onJoinRoom(cleanCode, finalName, userProfile?.wins, userProfile?.chips);
   };
 
   const chipsCount = userProfile?.chips ?? 500;
@@ -757,7 +765,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
             {/* Bento Grid layout */}
             <div className="grid md:grid-cols-12 gap-6">
-              
+
               {/* Card 1: Criar Sala VIP (Column span 7) */}
               <div className="md:col-span-7 bg-stone-900/60 border border-stone-800/80 backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden group flex flex-col justify-between min-h-[240px]">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[50px] rounded-full -z-10 group-hover:bg-emerald-500/10 transition-colors duration-500" />
@@ -816,9 +824,19 @@ export const Lobby: React.FC<LobbyProps> = ({
                     id="join-room-code"
                     type="text"
                     value={roomCode}
-                    onChange={e => setRoomCode(e.target.value.toUpperCase())}
+                    onChange={e => {
+                      let val = e.target.value.toUpperCase();
+                      if (val.includes('ROOM=')) {
+                        const match = val.match(/ROOM=([A-Z0-9]+)/i);
+                        if (match) val = match[1].toUpperCase();
+                      }
+                      if (val.startsWith('#')) {
+                        val = val.substring(1);
+                      }
+                      setRoomCode(val.trim());
+                    }}
                     placeholder="DIGITE O CÓDIGO"
-                    maxLength={8}
+                    maxLength={12}
                     className="w-full bg-black/40 border border-stone-800 focus:border-amber-500/50 rounded-xl px-5 py-3 text-base sm:text-lg text-white font-mono tracking-[0.25em] placeholder-stone-800 uppercase transition-all focus:outline-none focus:ring-4 focus:ring-amber-500/10 text-center font-black"
                   />
                   <button
@@ -826,8 +844,17 @@ export const Lobby: React.FC<LobbyProps> = ({
                     disabled={!roomCode.trim() || isConnecting}
                     className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-widest text-xs bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 shadow-[0_4px_20px_rgba(245,158,11,0.2)] flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:-translate-y-0.5 cursor-pointer"
                   >
-                    <LogIn className="w-4 h-4" />
-                    Entrar na Mesa
+                    {isConnecting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-stone-950 border-t-transparent rounded-full animate-spin" />
+                        <span>Entrando na Mesa...</span>
+                      </>
+                    ) : (
+                      <>
+                        <LogIn className="w-4 h-4" />
+                        <span>Entrar na Mesa</span>
+                      </>
+                    )}
                   </button>
                 </form>
               </div>
