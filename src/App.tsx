@@ -957,6 +957,24 @@ export default function App() {
     socket.emit('chat:send', { text });
   };
 
+  const handleTakeSeat = (seatIndex: number) => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current || !socket?.connected) {
+      localGameEngine.takeSeat('local-player', seatIndex);
+      return;
+    }
+    socket.emit('player:take_seat', { seatIndex });
+  };
+
+  const handleStandUp = () => {
+    sounds.playChipBet();
+    if (isLocalModeRef.current || !socket?.connected) {
+      localGameEngine.standUp('local-player');
+      return;
+    }
+    socket.emit('player:stand_up');
+  };
+
   const toggleMute = () => {
     const muted = sounds.toggleMute();
     setIsMuted(muted);
@@ -1190,104 +1208,142 @@ export default function App() {
           {/* Table Arch Motto */}
           <div className="w-full flex items-center justify-center my-1 pointer-events-none select-none z-10">
             <div className="border border-amber-400/20 rounded-full px-6 py-1 text-center text-amber-200/50 font-mono text-[10px] sm:text-xs tracking-widest uppercase bg-black/30 backdrop-blur-sm">
-              BLACKJACK PAYS 3 TO 2 • DEALER MUST STAND ON 17 • 8-SEAT ROUND TABLE
+              BLACKJACK PAYS 3 TO 2 • DEALER MUST STAND ON 17 • 9-SEAT ROUND TABLE
             </div>
           </div>
 
-          {/* Players Seats Curved Arc (Up to 8 Players) */}
-          <div
-            id="players-seats-container"
-            className="w-full grid grid-cols-8 gap-0.5 sm:gap-1.5 md:gap-3 items-end justify-center mt-auto pt-4 pb-2 z-10"
-          >
-            {(() => {
-              const activePlayers = roomState.players.filter(p => !p.isSpectator);
-              const sortedPlayers = [...activePlayers].sort((a, b) => {
-                const winsA = a.wins || 0;
-                const winsB = b.wins || 0;
-                if (winsB !== winsA) return winsB - winsA;
-                return b.chips - a.chips;
-              });
+          {/* Players Seats Curved Arc (Up to 9 Players) */}
+          <div className="w-full flex justify-center mt-auto px-1 sm:px-2 md:px-4 lg:px-6">
+            <div
+              id="players-seats-container"
+              className="w-[580px] xs:w-[700px] sm:w-[840px] md:w-full md:max-w-[98%] lg:max-w-[97%] xl:max-w-[96%] 2xl:max-w-[95%] grid grid-cols-9 gap-1 sm:gap-1.5 md:gap-2 lg:gap-3 xl:gap-4 items-end justify-center pt-8 pb-3 z-10 origin-bottom transform scale-[0.54] xs:scale-[0.66] sm:scale-[0.80] md:scale-100"
+            >
+              {(() => {
+                const TOTAL_SEATS = 9;
 
-              return activePlayers.map((player, idx) => {
-                // Symmetrical gentle curvature offset for 8-seat round table arc
-                const seatPos = idx;
-                let arcOffsetClass = '';
-                if (seatPos === 0) {
-                  arcOffsetClass = '-translate-y-6 sm:-translate-y-10 md:-translate-y-14 lg:-translate-y-18 translate-x-1 sm:translate-x-2';
-                } else if (seatPos === 7) {
-                  arcOffsetClass = '-translate-y-6 sm:-translate-y-10 md:-translate-y-14 lg:-translate-y-18 -translate-x-1 sm:-translate-x-2';
-                } else if (seatPos === 1) {
-                  arcOffsetClass = '-translate-y-3 sm:-translate-y-5 md:-translate-y-7 lg:-translate-y-9 translate-x-0.5 sm:translate-x-1';
-                } else if (seatPos === 6) {
-                  arcOffsetClass = '-translate-y-3 sm:-translate-y-5 md:-translate-y-7 lg:-translate-y-9 -translate-x-0.5 sm:-translate-x-1';
-                } else if (seatPos === 2) {
-                  arcOffsetClass = '-translate-y-1 sm:-translate-y-1.5 md:-translate-y-2 lg:-translate-y-2.5';
-                } else if (seatPos === 5) {
-                  arcOffsetClass = '-translate-y-1 sm:-translate-y-1.5 md:-translate-y-2 lg:-translate-y-2.5';
-                } else {
-                  arcOffsetClass = 'translate-y-0';
-                }
+                const activePlayers = roomState.players.filter(p => !p.isSpectator);
+                const sortedPlayers = [...activePlayers].sort((a, b) => {
+                  const winsA = a.wins || 0;
+                  const winsB = b.wins || 0;
+                  if (winsB !== winsA) return winsB - winsA;
+                  return b.chips - a.chips;
+                });
 
-                const rank = sortedPlayers.findIndex(p => p.id === player.id);
+                // Map of seatIndex -> Player
+                const seatToPlayerMap = new Map<number, Player>();
+                activePlayers.forEach(player => {
+                  if (player.seatIndex >= 0 && player.seatIndex < TOTAL_SEATS) {
+                    seatToPlayerMap.set(player.seatIndex, player);
+                  }
+                });
 
-                return (
-                  <div key={player.id} className={`w-full flex justify-center transition-transform ${arcOffsetClass}`}>
-                    <PlayerSeat
-                      player={player}
-                      isSelf={isSelf(player.id)}
-                      selfPlayer={selfPlayer}
-                      isActiveTurn={roomState.activePlayerId === player.id}
-                      phase={roomState.phase}
-                      onUpdateName={handleUpdatePlayerName}
-                      onRequestLoan={handleRequestLoan}
-                      onRepayLoan={handleRepayLoan}
-                      onViewProfile={() => setSelectedProfilePlayer(player)}
-                      rank={rank}
-                      turnStartTime={roomState.turnStartTime}
-                      turnTimeout={roomState.turnTimeout}
-                    />
-                  </div>
-                );
-              });
-            })()}
+                // Render 9 columns from Left to Right (col 0 to 8):
+                // "O assento que começa da direita (Assento 1) e o último assento termina na esquerda (Assento 9)":
+                // col 0 (far left)  => Assento 9 (seatIndex 8)
+                // col 1             => Assento 8 (seatIndex 7)
+                // col 2             => Assento 7 (seatIndex 6)
+                // col 3             => Assento 6 (seatIndex 5)
+                // col 4 (center)    => Assento 5 (seatIndex 4)
+                // col 5             => Assento 4 (seatIndex 3)
+                // col 6             => Assento 3 (seatIndex 2)
+                // col 7             => Assento 2 (seatIndex 1)
+                // col 8 (rightmost) => Assento 1 (seatIndex 0)
+                const columns = Array.from({ length: TOTAL_SEATS }, (_, col) => {
+                  const seatIndex = (TOTAL_SEATS - 1) - col;
+                  const seatNumber = seatIndex + 1;
+                  const player = seatToPlayerMap.get(seatIndex) || null;
+                  return { col, seatIndex, seatNumber, player };
+                });
 
-            {/* Empty seat placeholders if fewer than 8 players */}
-            {Array.from({ length: Math.max(0, 8 - roomState.players.filter(p => !p.isSpectator).length) }).map((_, i) => {
-              const emptyIndex = roomState.players.filter(p => !p.isSpectator).length + i;
-              let arcOffsetClass = '';
-              if (emptyIndex === 0) {
-                arcOffsetClass = '-translate-y-6 sm:-translate-y-10 md:-translate-y-14 lg:-translate-y-18 translate-x-1 sm:translate-x-2';
-              } else if (emptyIndex === 7) {
-                arcOffsetClass = '-translate-y-6 sm:-translate-y-10 md:-translate-y-14 lg:-translate-y-18 -translate-x-1 sm:-translate-x-2';
-              } else if (emptyIndex === 1) {
-                arcOffsetClass = '-translate-y-3 sm:-translate-y-5 md:-translate-y-7 lg:-translate-y-9 translate-x-0.5 sm:translate-x-1';
-              } else if (emptyIndex === 6) {
-                arcOffsetClass = '-translate-y-3 sm:-translate-y-5 md:-translate-y-7 lg:-translate-y-9 -translate-x-0.5 sm:-translate-x-1';
-              } else if (emptyIndex === 2) {
-                arcOffsetClass = '-translate-y-1 sm:-translate-y-1.5 md:-translate-y-2 lg:-translate-y-2.5';
-              } else if (emptyIndex === 5) {
-                arcOffsetClass = '-translate-y-1 sm:-translate-y-1.5 md:-translate-y-2 lg:-translate-y-2.5';
-              } else {
-                arcOffsetClass = 'translate-y-0';
-              }
+                return columns.map(({ col, seatIndex, seatNumber, player }) => {
+                  // O Assento 5 (col 4) fica no meião (base) e os assentos vão subindo em direção às pontas (Assento 1 e 9)
+                  // Os assentos são mantidos retos (sem inclinação angular/rotate)
+                  const distFromCenter = Math.abs(col - 4);
+                  let arcOffsetClass = 'translate-y-0';
+                  if (distFromCenter === 1) {
+                    // Assento 6 (esquerda) e Assento 4 (direita)
+                    arcOffsetClass = '-translate-y-2 sm:-translate-y-3 md:-translate-y-4 lg:-translate-y-5 xl:-translate-y-6';
+                  } else if (distFromCenter === 2) {
+                    // Assento 7 (esquerda) e Assento 3 (direita)
+                    arcOffsetClass = '-translate-y-5 sm:-translate-y-7 md:-translate-y-10 lg:-translate-y-13 xl:-translate-y-16';
+                  } else if (distFromCenter === 3) {
+                    // Assento 8 (esquerda) e Assento 2 (direita)
+                    arcOffsetClass = '-translate-y-9 sm:-translate-y-13 md:-translate-y-18 lg:-translate-y-23 xl:-translate-y-28';
+                  } else if (distFromCenter === 4) {
+                    // Assento 9 (extrema esquerda) e Assento 1 (extrema direita)
+                    arcOffsetClass = '-translate-y-14 sm:-translate-y-20 md:-translate-y-28 lg:-translate-y-35 xl:-translate-y-42';
+                  }
 
-              return (
-                <div
-                  key={`empty-${i}`}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-2xl border border-dashed border-white/10 bg-black/25 min-h-[90px] sm:min-h-[105px] text-center w-full max-w-[130px] sm:max-w-[145px] mx-auto transition-transform ${arcOffsetClass}`}
-                >
-                  <div className="w-5 h-5 rounded-full border border-white/10 flex items-center justify-center text-white/30 text-xs mb-1">
-                    +
-                  </div>
-                  <span className="text-[9px] text-white/30 font-medium">
-                    Assento {emptyIndex + 1}
-                  </span>
-                  <span className="text-[7px] text-amber-400/50 mt-0.5">
-                    Convide
-                  </span>
-                </div>
-              );
-            })}
+                  if (player) {
+                    const rank = sortedPlayers.findIndex(p => p.id === player.id);
+                    return (
+                      <div key={player.id} className={`w-full flex justify-center transition-transform duration-300 ${arcOffsetClass}`}>
+                        <PlayerSeat
+                          player={player}
+                          isSelf={isSelf(player.id)}
+                          selfPlayer={selfPlayer}
+                          isActiveTurn={roomState.activePlayerId === player.id}
+                          phase={roomState.phase}
+                          onUpdateName={handleUpdatePlayerName}
+                          onRequestLoan={handleRequestLoan}
+                          onRepayLoan={handleRepayLoan}
+                          onViewProfile={() => setSelectedProfilePlayer(player)}
+                          rank={rank}
+                          turnStartTime={roomState.turnStartTime}
+                          turnTimeout={roomState.turnTimeout}
+                        />
+                      </div>
+                    );
+                  } else {
+                    const isSelfSpectator = !!selfPlayer?.isSpectator;
+                    const canTakeSeat = isSelfSpectator || (selfPlayer && selfPlayer.status !== 'playing');
+
+                    return (
+                      <button
+                        type="button"
+                        key={`empty-seat-${seatIndex}`}
+                        onClick={() => {
+                          if (canTakeSeat) {
+                            handleTakeSeat(seatIndex);
+                          }
+                        }}
+                        disabled={!canTakeSeat}
+                        title={
+                          isSelfSpectator
+                            ? `Clique para escolher o Assento #${seatNumber} e jogar!`
+                            : `Trocar para o Assento #${seatNumber}`
+                        }
+                        className={`group relative flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-200 w-full max-w-[125px] sm:max-w-[140px] lg:max-w-[155px] xl:max-w-[165px] mx-auto min-h-[95px] sm:min-h-[110px] text-center cursor-pointer ${
+                          isSelfSpectator
+                            ? 'border-amber-400/60 bg-amber-500/10 hover:bg-amber-500/25 hover:border-amber-300 hover:shadow-[0_0_20px_rgba(245,158,11,0.35)] hover:scale-105 active:scale-95 animate-pulse'
+                            : 'border-dashed border-white/15 bg-black/30 hover:border-white/30 hover:bg-white/5 active:scale-95'
+                        } ${arcOffsetClass}`}
+                      >
+                        <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs mb-1 transition-transform group-hover:scale-110 ${
+                          isSelfSpectator
+                            ? 'border-amber-400 bg-amber-500/30 text-amber-300 font-black shadow-[0_0_10px_rgba(245,158,11,0.4)]'
+                            : 'border-white/20 bg-white/5 text-white/40'
+                        }`}>
+                          +
+                        </div>
+                        <span className={`text-[10px] sm:text-[11px] font-black tracking-tight ${
+                          isSelfSpectator ? 'text-amber-200' : 'text-white/50'
+                        }`}>
+                          Assento {seatNumber}
+                        </span>
+                        <span className={`mt-1 text-[8px] sm:text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full transition-colors ${
+                          isSelfSpectator
+                            ? 'bg-amber-400 text-stone-950 shadow-[0_0_8px_rgba(245,158,11,0.5)] group-hover:bg-amber-300'
+                            : 'bg-emerald-500/10 text-emerald-400/80 border border-emerald-500/20'
+                        }`}>
+                          {isSelfSpectator ? 'Sentar Aqui' : 'Livre'}
+                        </span>
+                      </button>
+                    );
+                  }
+                });
+              })()}
+            </div>
           </div>
         </div>
       </main>
@@ -1295,10 +1351,42 @@ export default function App() {
       {/* 3. TABLE CONTROLS BOTTOM PANEL (ELEGANT DARK) */}
       <footer className="w-full bg-black/60 backdrop-blur-md border-t border-white/10 p-2 sm:p-4 z-30">
         {selfPlayer?.isSpectator ? (
-          <div className="w-full flex items-center justify-center p-2 sm:p-4">
-            <span className="text-white/70 text-sm font-bold bg-black/50 px-6 py-2 rounded-full border border-white/10">
-              Modo Espectador - A mesa está cheia
-            </span>
+          <div className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-stone-900/90 backdrop-blur-md rounded-2xl border border-amber-500/30 shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
+            <div className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full bg-amber-400 animate-pulse flex-shrink-0"></span>
+              <div className="text-left">
+                <p className="text-white text-xs sm:text-sm font-black flex items-center gap-2">
+                  <span>Modo Espectador</span>
+                  <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+                    {Math.max(0, 9 - roomState.players.filter(p => !p.isSpectator).length)} vaga(s) livre(s)
+                  </span>
+                </p>
+                <p className="text-stone-300 text-[11px] sm:text-xs">
+                  {roomState.players.filter(p => !p.isSpectator).length < 9
+                    ? 'Clique em qualquer um dos assentos livres na mesa acima para escolher seu lugar e jogar!'
+                    : 'Todos os 9 assentos estão ocupados no momento. Aguarde um jogador sair para sentar.'}
+                </p>
+              </div>
+            </div>
+
+            {roomState.players.filter(p => !p.isSpectator).length < 9 && (
+              <button
+                type="button"
+                id="btn-quick-sit"
+                onClick={() => {
+                  const takenSeats = new Set(roomState.players.filter(p => !p.isSpectator).map(p => p.seatIndex));
+                  for (let s = 0; s < 9; s++) {
+                    if (!takenSeats.has(s)) {
+                      handleTakeSeat(s);
+                      break;
+                    }
+                  }
+                }}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.3)] transition-all active:scale-95 cursor-pointer flex items-center gap-2 whitespace-nowrap"
+              >
+                <span>⚡ Ocupar Vaga Livre</span>
+              </button>
+            )}
           </div>
         ) : (
           <TableControls
@@ -1308,7 +1396,7 @@ export default function App() {
             phase={roomState.phase}
             canStartDeal={canStartDeal}
             botsCount={roomState.players.filter(p => p.isBot).length}
-            maxBots={Math.max(0, 7 - roomState.players.filter(p => !p.isBot && !p.isSpectator).length)}
+            maxBots={Math.max(0, 9 - roomState.players.filter(p => !p.isBot && !p.isSpectator).length)}
             onBetChange={handleBetChange}
             onReadyToggle={handleReadyToggle}
             onStartDeal={handleStartDeal}
@@ -1319,6 +1407,7 @@ export default function App() {
             onAddBot={handleAddBot}
             onRemoveBot={handleRemoveBot}
             onToggleBots={handleToggleBots}
+            onStandUp={handleStandUp}
           />
         )}
       </footer>

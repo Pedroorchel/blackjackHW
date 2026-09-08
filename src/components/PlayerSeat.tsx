@@ -98,7 +98,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   return (
     <div
       id={`player-seat-${player.id}`}
-      className={`relative flex flex-col items-center justify-end p-1 rounded-xl transition-all duration-300 w-full max-w-[130px] sm:max-w-[145px] ${
+      className={`relative flex flex-col items-center justify-end p-1 rounded-xl transition-all duration-300 w-full max-w-[130px] sm:max-w-[145px] lg:max-w-[160px] xl:max-w-[175px] ${
         isActiveTurn
           ? 'scale-105 z-20'
           : ''

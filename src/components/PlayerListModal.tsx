@@ -25,7 +25,9 @@ export const PlayerListModal: React.FC<PlayerListModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const activePlayers = players.filter(p => !p.isSpectator);
+  const activePlayers = players
+    .filter(p => !p.isSpectator)
+    .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
   const spectators = players.filter(p => p.isSpectator);
 
   const selfPlayer = players.find(p => p.id === selfPlayerId) || null;
@@ -66,7 +68,7 @@ export const PlayerListModal: React.FC<PlayerListModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-2">
               <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
-                Assentos da Mesa ({activePlayers.length}/8)
+                Assentos da Mesa ({activePlayers.length}/9)
               </span>
             </div>
 

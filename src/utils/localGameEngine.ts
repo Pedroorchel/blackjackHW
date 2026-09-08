@@ -93,7 +93,6 @@ export class LocalGameEngine {
       }
     ];
 
-    const initialBet = Math.min(25, chips > 0 ? chips : 25);
     const initialChips = Math.max(chips, 100);
 
     this.players = [
@@ -103,12 +102,13 @@ export class LocalGameEngine {
         chips: initialChips,
         currentBet: 0,
         cards: [],
-        status: 'betting',
+        status: 'spectator',
         outcome: null,
         payout: 0,
         isHost: true,
         isReady: false,
-        seatIndex: 0,
+        seatIndex: -1,
+        isSpectator: true,
         debts: {},
         wins: wins || 0,
         avatarUrl,
@@ -117,7 +117,7 @@ export class LocalGameEngine {
     ];
 
     // Populate initial bots with completely unique procedural generation
-    const count = Math.min(initialBotsCount, 5);
+    const count = Math.min(initialBotsCount, 7);
     for (let i = 0; i < count; i++) {
       this.addBot(false);
     }
@@ -135,20 +135,22 @@ export class LocalGameEngine {
   }
 
   public addBot(emit: boolean = true): boolean {
-    if (this.players.length >= 6) {
-      this.emitEvent('error', 'A mesa já está cheia (máximo de 6 jogadores).');
+    const seatedCount = this.players.filter(p => !p.isSpectator).length;
+    if (seatedCount >= 9) {
+      this.emitEvent('error', 'A mesa já está cheia (máximo de 9 jogadores).');
       return false;
     }
 
-    // Find first free seat index
-    const takenSeats = new Set(this.players.map(p => p.seatIndex));
-    let availableSeat = 1;
-    for (let s = 1; s <= 5; s++) {
+    // Find first free seat index from 0 to 8
+    const takenSeats = new Set(this.players.filter(p => !p.isSpectator).map(p => p.seatIndex));
+    let availableSeat = -1;
+    for (let s = 0; s <= 8; s++) {
       if (!takenSeats.has(s)) {
         availableSeat = s;
         break;
       }
     }
+    if (availableSeat === -1) return false;
 
     // Generate unique procedural bot
     const excludedIds = this.players.map(p => p.id);
@@ -169,6 +171,80 @@ export class LocalGameEngine {
       this.emitEvent('info', `🤖 ${botPlayer.name} entrou na mesa com $${botPlayer.chips + botPlayer.currentBet}!`);
       this.emitState();
     }
+    return true;
+  }
+
+  public takeSeat(playerId: string, seatIndex: number): boolean {
+    if (seatIndex < 0 || seatIndex >= 9) {
+      this.emitEvent('error', 'Assento inválido (escolha de 1 a 9).');
+      return false;
+    }
+
+    const occupied = this.players.some(p => !p.isSpectator && p.seatIndex === seatIndex && p.id !== playerId && p.id !== 'local-player');
+    if (occupied) {
+      this.emitEvent('error', `O Assento ${seatIndex + 1} já está ocupado!`);
+      return false;
+    }
+
+    const player = this.players.find(p => p.id === playerId || (playerId === 'local-player' && p.id === 'local-player'));
+    if (!player) return false;
+
+    if (player.status === 'playing') {
+      this.emitEvent('error', 'Termine a sua jogada antes de trocar de assento.');
+      return false;
+    }
+
+    const prevSeat = player.seatIndex;
+    player.isSpectator = false;
+    player.seatIndex = seatIndex;
+    player.status = this.phase === 'betting' ? 'betting' : 'waiting';
+    player.isReady = false;
+    player.currentBet = 0;
+
+    this.messages.push({
+      id: 'msg-seat-' + Date.now(),
+      senderName: 'Dealer VIP',
+      text: prevSeat >= 0 && prevSeat !== seatIndex
+        ? `${player.name} mudou para o Assento ${seatIndex + 1}.`
+        : `${player.name} sentou no Assento ${seatIndex + 1}!`,
+      timestamp: Date.now(),
+    });
+
+    this.emitEvent('info', `Você sentou no Assento ${seatIndex + 1}.`);
+    this.emitState();
+    return true;
+  }
+
+  public standUp(playerId: string): boolean {
+    const player = this.players.find(p => p.id === playerId || (playerId === 'local-player' && p.id === 'local-player'));
+    if (!player || player.isSpectator) return false;
+
+    if (player.status === 'playing') {
+      this.emitEvent('error', 'Termine a sua jogada antes de se levantar.');
+      return false;
+    }
+
+    if (this.phase === 'betting' && player.currentBet > 0) {
+      player.chips += player.currentBet;
+      player.currentBet = 0;
+    }
+
+    const prevSeat = player.seatIndex;
+    player.isSpectator = true;
+    player.seatIndex = -1;
+    player.status = 'spectator';
+    player.isReady = false;
+    player.cards = [];
+
+    this.messages.push({
+      id: 'msg-stand-' + Date.now(),
+      senderName: 'Dealer VIP',
+      text: `${player.name} levantou do Assento ${prevSeat + 1} e agora está assistindo como espectador.`,
+      timestamp: Date.now(),
+    });
+
+    this.emitEvent('info', 'Você agora está no modo espectador.');
+    this.emitState();
     return true;
   }
 
@@ -254,6 +330,12 @@ export class LocalGameEngine {
     };
 
     this.players.forEach(p => {
+      if (p.isSpectator) {
+        p.status = 'spectator';
+        p.cards = [];
+        p.currentBet = 0;
+        return;
+      }
       p.cards = [];
       p.outcome = null;
       p.payout = 0;
@@ -306,7 +388,9 @@ export class LocalGameEngine {
       this.turnTimeout = 20;
 
       // Start with first active player
-      const activePlayers = this.players.filter(p => p.currentBet > 0);
+      const activePlayers = this.players
+        .filter(p => p.currentBet > 0)
+        .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
       const firstPlayer = activePlayers.find(p => p.status === 'playing');
 
       if (firstPlayer) {
@@ -386,7 +470,9 @@ export class LocalGameEngine {
   }
 
   private advanceTurn() {
-    const activePlayers = this.players.filter(p => p.currentBet > 0);
+    const activePlayers = this.players
+      .filter(p => p.currentBet > 0)
+      .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
     const currentIndex = activePlayers.findIndex(p => p.id === this.activePlayerId);
 
     let nextPlayer: Player | null = null;
@@ -708,7 +794,11 @@ export class LocalGameEngine {
 
       p.currentBet = 0;
       p.isReady = false;
-      p.status = 'betting';
+      if (p.isSpectator) {
+        p.status = 'spectator';
+      } else {
+        p.status = 'betting';
+      }
     });
 
     this.emitState();

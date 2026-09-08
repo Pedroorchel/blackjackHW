@@ -22,6 +22,7 @@ interface TableControlsProps {
   onAddBot?: () => void;
   onRemoveBot?: () => void;
   onToggleBots?: () => void;
+  onStandUp?: () => void;
 }
 
 const CHIP_VALUES = [10, 25, 50, 100, 500];
@@ -43,7 +44,8 @@ export const TableControls: React.FC<TableControlsProps> = ({
   onNewRound,
   onAddBot,
   onRemoveBot,
-  onToggleBots
+  onToggleBots,
+  onStandUp
 }) => {
   const [showViewToggle, setShowViewToggle] = useState(false);
 
@@ -92,6 +94,17 @@ export const TableControls: React.FC<TableControlsProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {onStandUp && (
+                <button
+                  type="button"
+                  id="btn-stand-up"
+                  onClick={onStandUp}
+                  className="px-2.5 py-1.5 text-xs rounded-lg bg-stone-900 border border-white/10 text-stone-300 hover:text-white hover:bg-stone-800 transition-colors cursor-pointer font-bold flex items-center gap-1"
+                  title="Levantar do assento e voltar para o modo espectador"
+                >
+                  <span>👁️ Levantar</span>
+                </button>
+              )}
               <button
                 type="button"
                 id="btn-clear-bet"

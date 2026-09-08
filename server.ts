@@ -5,6 +5,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { Card, Dealer, OutcomeType, Player, PlayerStatus, RoomState, RoundPhase, TableChatMessage } from './src/types';
 import { calculateHandScore, createDeck } from './src/utils/blackjack';
+import { generateUniqueBot, BOT_CHAT_GREETINGS, BOT_WIN_REACTIONS, BOT_BUST_REACTIONS } from './src/utils/botGenerator';
 
 const app = express();
 const httpServer = createServer(app);
@@ -104,7 +105,9 @@ function startTurnTimer(room: RoomInternal, playerId: string) {
 function advanceTurn(room: RoomInternal) {
   clearTurnTimer(room);
 
-  const activePlayers = room.players.filter(p => p.currentBet > 0);
+  const activePlayers = room.players
+    .filter(p => p.currentBet > 0)
+    .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
   const currentIndex = activePlayers.findIndex(p => p.id === room.activePlayerId);
 
   // Find next player who still needs to play
@@ -136,10 +139,133 @@ function advanceTurn(room: RoomInternal) {
 
     startTurnTimer(room, nextPlayer.id);
     broadcastRoom(room.roomId);
+
+    // If next player is a bot, trigger their turn logic
+    if (nextPlayer.isBot) {
+      setTimeout(() => runServerBotTurn(room, nextPlayer!), 900);
+    }
+
   } else {
     // All player turns are done -> Dealer turn
     room.activePlayerId = null;
     startDealerTurn(room);
+  }
+}
+
+// Basic bot logic for the server side
+function runServerBotTurn(room: RoomInternal, bot: Player) {
+  if (room.phase !== 'player_turns' || room.activePlayerId !== bot.id || bot.status !== 'playing') return;
+
+  const dealerVisibleCard = room.dealer.cards[0];
+  const dealerUpVal = dealerVisibleCard 
+    ? (dealerVisibleCard.rank === 'A' ? 11 : ['K','Q','J','10'].includes(dealerVisibleCard.rank) ? 10 : parseInt(dealerVisibleCard.rank, 10)) 
+    : 10;
+
+  const botScore = calculateHandScore(bot.cards);
+
+  // Can bot double down? (2 cards, 9, 10 or 11 against dealer weak card)
+  if (bot.cards.length === 2 && bot.chips >= bot.currentBet) {
+    const isGoodDouble = (botScore.total === 11) || 
+                         (botScore.total === 10 && dealerUpVal <= 9) || 
+                         (botScore.total === 9 && dealerUpVal >= 3 && dealerUpVal <= 6 && (bot.botPersonality === 'aggressive' || bot.botPersonality === 'high_roller'));
+    if (isGoodDouble) {
+      bot.chips -= bot.currentBet;
+      bot.currentBet *= 2;
+      bot.status = 'doubled';
+      const card = drawCard(room, false);
+      bot.cards.push(card);
+      
+      const newScore = calculateHandScore(bot.cards);
+      io.to(room.roomId).emit('game:event', {
+        type: 'hit',
+        message: `🤖 ${bot.name} dobrou a aposta e recebeu ${card.rank}${card.suit}`
+      });
+
+      if (newScore.isBust) {
+        bot.status = 'busted';
+        bot.outcome = 'bust';
+        io.to(room.roomId).emit('game:event', {
+          type: 'bust',
+          message: `🤖 ${bot.name} dobrou e estourou com ${newScore.total}!`
+        });
+      }
+      
+      broadcastRoom(room.roomId);
+      setTimeout(() => advanceTurn(room), 1000);
+      return;
+    }
+  }
+
+  // Strategy decision
+  let shouldHit = false;
+
+  if (botScore.isBust) {
+    bot.status = 'busted';
+    bot.outcome = 'bust';
+    advanceTurn(room);
+    return;
+  }
+
+  if (botScore.total >= 17 && !botScore.isSoft) {
+    shouldHit = false;
+  } else if (botScore.total <= 11) {
+    shouldHit = true;
+  } else if (botScore.total >= 12 && botScore.total <= 16) {
+    if (botScore.isSoft) {
+      shouldHit = true;
+    } else {
+      if (bot.botPersonality === 'aggressive' && botScore.total === 16 && dealerUpVal >= 7) {
+        shouldHit = true;
+      } else if (bot.botPersonality === 'conservative' && botScore.total >= 13) {
+        shouldHit = dealerUpVal >= 8;
+      } else {
+        shouldHit = dealerUpVal >= 7;
+      }
+    }
+  } else if (botScore.isSoft && botScore.total === 17) {
+    shouldHit = true;
+  } else {
+    shouldHit = false;
+  }
+
+  if (shouldHit) {
+    const card = drawCard(room, false);
+    bot.cards.push(card);
+    const newScore = calculateHandScore(bot.cards);
+
+    io.to(room.roomId).emit('game:event', {
+      type: 'hit',
+      message: `🤖 ${bot.name} pediu carta e recebeu ${card.rank}${card.suit}`
+    });
+    
+    broadcastRoom(room.roomId);
+
+    if (newScore.isBust) {
+      bot.status = 'busted';
+      bot.outcome = 'bust';
+      io.to(room.roomId).emit('game:event', {
+        type: 'bust',
+        message: `🤖 ${bot.name} estourou com ${newScore.total} pontos!`
+      });
+      setTimeout(() => advanceTurn(room), 1000);
+    } else if (newScore.total === 21) {
+      bot.status = 'stand';
+      io.to(room.roomId).emit('game:event', {
+        type: 'stand',
+        message: `🤖 ${bot.name} atingiu 21 e parou.`
+      });
+      setTimeout(() => advanceTurn(room), 800);
+    } else {
+      setTimeout(() => runServerBotTurn(room, bot), 900);
+    }
+  } else {
+    bot.status = 'stand';
+    io.to(room.roomId).emit('game:event', {
+      type: 'stand',
+      message: `🤖 ${bot.name} parou com ${botScore.total} pontos.`
+    });
+    broadcastRoom(room.roomId);
+    setTimeout(() => advanceTurn(room), 700);
   }
 }
 
@@ -281,6 +407,28 @@ function finishRound(room: RoomInternal, customSummary?: string) {
     
     if (outcome === 'win' || outcome === 'blackjack') {
       player.wins = (player.wins || 0) + 1;
+      
+      // Bot winning reactions
+      if (player.isBot && Math.random() < 0.4) {
+        const winReaction = BOT_WIN_REACTIONS[Math.floor(Math.random() * BOT_WIN_REACTIONS.length)];
+        room.messages.push({
+          id: `bot-react-${Date.now()}-${Math.random()}`,
+          senderName: player.name,
+          text: winReaction,
+          timestamp: Date.now(),
+        });
+      }
+    } else if (outcome === 'bust' || outcome === 'lose') {
+      // Bot losing reactions
+      if (player.isBot && Math.random() < 0.25) {
+        const bustReaction = BOT_BUST_REACTIONS[Math.floor(Math.random() * BOT_BUST_REACTIONS.length)];
+        room.messages.push({
+          id: `bot-react-${Date.now()}-${Math.random()}`,
+          senderName: player.name,
+          text: bustReaction,
+          timestamp: Date.now(),
+        });
+      }
     }
   });
 
@@ -319,12 +467,13 @@ io.on('connection', (socket: Socket) => {
       chips: typeof chips === 'number' ? Math.min(250000, chips) : 500,
       currentBet: 0,
       cards: [],
-      status: 'betting',
+      status: 'spectator',
       outcome: null,
       payout: 0,
       isHost: true,
       isReady: false,
-      seatIndex: 0,
+      seatIndex: -1,
+      isSpectator: true,
       debts: {},
       wins: typeof wins === 'number' ? wins : 0,
       avatarUrl: typeof avatarUrl === 'string' ? avatarUrl : undefined
@@ -348,7 +497,7 @@ io.on('connection', (socket: Socket) => {
       messages: [{
         id: `sys-${Date.now()}`,
         senderName: 'Mesa',
-        text: `Sala criada com código ${roomId}. Boa sorte!`,
+        text: `Sala criada com código ${roomId}. Você entrou como espectador. Escolha um assento livre para jogar!`,
         timestamp: Date.now(),
         isSystem: true
       }],
@@ -361,7 +510,7 @@ io.on('connection', (socket: Socket) => {
     broadcastRoom(roomId);
   });
 
-  // Join room
+  // Join room - Always enters as spectator initially as requested
   socket.on('room:join', ({ roomId, playerName, wins, chips, avatarUrl }, callback) => {
     const upperId = roomId.trim().toUpperCase();
     const room = rooms.get(upperId);
@@ -371,35 +520,22 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const nonSpectators = room.players.filter(p => !p.isSpectator);
-    const isSpectator = nonSpectators.length >= 8;
-
     currentRoomId = upperId;
     socket.join(upperId);
-
-    // Determine available seat if not spectator
-    let availableSeat = -1;
-    if (!isSpectator) {
-      const takenSeats = new Set(nonSpectators.map(p => p.seatIndex));
-      availableSeat = 0;
-      while (takenSeats.has(availableSeat)) {
-        availableSeat++;
-      }
-    }
 
     const newPlayer: Player = {
       id: socket.id,
       name: playerName.trim() || `Jogador ${room.players.length + 1}`,
-      chips: isSpectator ? 0 : (typeof chips === 'number' ? Math.min(250000, chips) : 500),
+      chips: typeof chips === 'number' ? Math.min(250000, chips) : 500,
       currentBet: 0,
       cards: [],
-      status: isSpectator ? 'spectator' : (room.phase === 'betting' ? 'betting' : 'waiting'),
+      status: 'spectator',
       outcome: null,
       payout: 0,
       isHost: false,
       isReady: false,
-      seatIndex: availableSeat,
-      isSpectator,
+      seatIndex: -1,
+      isSpectator: true,
       debts: {},
       wins: typeof wins === 'number' ? wins : 0,
       avatarUrl: typeof avatarUrl === 'string' ? avatarUrl : undefined
@@ -410,13 +546,101 @@ io.on('connection', (socket: Socket) => {
     room.messages.push({
       id: `sys-${Date.now()}`,
       senderName: 'Mesa',
-      text: `${newPlayer.name} entrou na sala${isSpectator ? ' como espectador' : ''}.`,
+      text: `${newPlayer.name} entrou na sala como espectador.`,
       timestamp: Date.now(),
       isSystem: true
     });
 
     callback({ success: true });
     broadcastRoom(upperId);
+  });
+
+  // Take a seat or change seat
+  socket.on('player:take_seat', ({ seatIndex }, callback) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+
+    if (typeof seatIndex !== 'number' || seatIndex < 0 || seatIndex >= 9) {
+      callback?.({ success: false, error: 'Assento inválido (escolha de 1 a 9).' });
+      return;
+    }
+
+    // Check if seat is already occupied by another seated player
+    const occupied = room.players.some(p => !p.isSpectator && p.seatIndex === seatIndex && p.id !== socket.id);
+    if (occupied) {
+      callback?.({ success: false, error: `O Assento ${seatIndex + 1} já está ocupado.` });
+      return;
+    }
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player) return;
+
+    if (player.status === 'playing') {
+      callback?.({ success: false, error: 'Termine a sua jogada antes de trocar de assento.' });
+      return;
+    }
+
+    const prevSeat = player.seatIndex;
+    player.isSpectator = false;
+    player.seatIndex = seatIndex;
+    player.status = room.phase === 'betting' ? 'betting' : 'waiting';
+    player.isReady = false;
+    player.currentBet = 0;
+
+    room.messages.push({
+      id: `sys-${Date.now()}`,
+      senderName: 'Mesa',
+      text: prevSeat >= 0 && prevSeat !== seatIndex
+        ? `${player.name} mudou para o Assento ${seatIndex + 1}.`
+        : `${player.name} sentou no Assento ${seatIndex + 1}!`,
+      timestamp: Date.now(),
+      isSystem: true
+    });
+
+    callback?.({ success: true, seatIndex });
+    broadcastRoom(currentRoomId);
+    checkStartDeal(room);
+  });
+
+  // Stand up to spectator mode
+  socket.on('player:stand_up', (callback) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player || player.isSpectator) return;
+
+    if (player.status === 'playing') {
+      callback?.({ success: false, error: 'Termine sua rodada antes de se levantar.' });
+      return;
+    }
+
+    // Refund bet if in betting phase
+    if (room.phase === 'betting' && player.currentBet > 0) {
+      player.chips += player.currentBet;
+      player.currentBet = 0;
+    }
+
+    const prevSeat = player.seatIndex;
+    player.isSpectator = true;
+    player.seatIndex = -1;
+    player.status = 'spectator';
+    player.isReady = false;
+    player.cards = [];
+
+    room.messages.push({
+      id: `sys-${Date.now()}`,
+      senderName: 'Mesa',
+      text: `${player.name} levantou do Assento ${prevSeat + 1} e agora está assistindo como espectador.`,
+      timestamp: Date.now(),
+      isSystem: true
+    });
+
+    callback?.({ success: true });
+    broadcastRoom(currentRoomId);
+    checkStartDeal(room);
   });
 
   // Update name
@@ -488,6 +712,15 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  function checkStartDeal(room: RoomInternal) {
+    if (room.phase !== 'betting') return;
+    const seatedPlayers = room.players.filter(p => !p.isSpectator);
+    const allReady = seatedPlayers.every(p => p.isReady || p.chips === 0);
+    if (allReady && seatedPlayers.some(p => p.isReady)) {
+      startGameDeal(room);
+    }
+  }
+
   // Player ready / place bet
   socket.on('player:ready', () => {
     if (!currentRoomId) return;
@@ -499,13 +732,7 @@ io.on('connection', (socket: Socket) => {
       player.isReady = !player.isReady;
       player.status = player.isReady ? 'ready' : 'betting';
       broadcastRoom(currentRoomId);
-
-      // Check if all seated players are ready
-      const seatedPlayers = room.players.filter(p => !p.isSpectator);
-      const allReady = seatedPlayers.every(p => p.isReady || p.chips === 0);
-      if (allReady && seatedPlayers.some(p => p.isReady)) {
-        startGameDeal(room);
-      }
+      checkStartDeal(room);
     }
   });
 
@@ -530,7 +757,9 @@ io.on('connection', (socket: Socket) => {
   });
 
   function startGameDeal(room: RoomInternal) {
-    const readyPlayers = room.players.filter(p => !p.isSpectator && p.isReady && p.currentBet > 0);
+    const readyPlayers = room.players
+      .filter(p => !p.isSpectator && p.isReady && p.currentBet > 0)
+      .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
     if (readyPlayers.length === 0) return;
 
     room.phase = 'dealing';
@@ -592,6 +821,9 @@ io.on('connection', (socket: Socket) => {
         if (firstActive) {
           room.activePlayerId = firstActive.id;
           startTurnTimer(room, firstActive.id);
+          if (firstActive.isBot) {
+            setTimeout(() => runServerBotTurn(room, firstActive!), 900);
+          }
         } else {
           // All ready players had Blackjack
           room.activePlayerId = null;
@@ -860,6 +1092,117 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  // Toggle Bots on server (multiplayer)
+  socket.on('room:toggle_bots', () => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room || room.phase !== 'betting') return;
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (player && player.isHost) {
+      const bots = room.players.filter(p => p.isBot);
+      
+      if (bots.length > 0) {
+        // Remove all bots
+        room.players = room.players.filter(p => !p.isBot);
+        room.messages.push({
+          id: `sys-${Date.now()}`,
+          senderName: 'Mesa',
+          text: 'Todos os bots foram removidos da mesa.',
+          timestamp: Date.now(),
+          isSystem: true
+        });
+      } else {
+        // Add 3 bots
+        for (let i = 0; i < 3; i++) {
+          addBotToServerRoom(room);
+        }
+        room.messages.push({
+          id: `sys-${Date.now()}`,
+          senderName: 'Mesa',
+          text: '3 novos jogadores Bots de IA entraram na mesa!',
+          timestamp: Date.now(),
+          isSystem: true
+        });
+      }
+      broadcastRoom(currentRoomId);
+      checkStartDeal(room);
+    }
+  });
+
+  // Helper function to add a bot
+  function addBotToServerRoom(room: RoomInternal) {
+    const seatedCount = room.players.filter(p => !p.isSpectator).length;
+    if (seatedCount >= 9) return; // Max 9 seated players
+
+    const takenSeats = new Set(room.players.filter(p => !p.isSpectator).map(p => p.seatIndex));
+    let availableSeat = -1;
+    for (let s = 0; s < 9; s++) {
+      if (!takenSeats.has(s)) {
+        availableSeat = s;
+        break;
+      }
+    }
+    if (availableSeat === -1) return;
+    
+    const excludedIds = room.players.map(p => p.id);
+    const newBot = generateUniqueBot(availableSeat, excludedIds);
+    newBot.status = room.phase === 'betting' ? 'ready' : 'waiting';
+    newBot.isReady = room.phase === 'betting';
+    
+    // Automatically place a bet for the bot if added during betting phase
+    if (room.phase === 'betting') {
+       newBot.currentBet = Math.max(10, Math.floor(newBot.chips * 0.1));
+    }
+    
+    room.players.push(newBot);
+    
+    // Bot greeting reaction
+    if (Math.random() < 0.6) {
+      const greeting = BOT_CHAT_GREETINGS[Math.floor(Math.random() * BOT_CHAT_GREETINGS.length)];
+      room.messages.push({
+        id: `bot-greet-${Date.now()}-${Math.random()}`,
+        senderName: newBot.name,
+        text: greeting,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  // Remove Bot
+  socket.on('room:remove_bot', ({ botId }) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    
+    const player = room.players.find(p => p.id === socket.id);
+    if (player && player.isHost) {
+       const bots = room.players.filter(p => p.isBot);
+       if (bots.length === 0) return;
+       
+       const targetBot = botId ? bots.find(b => b.id === botId) : bots[bots.length - 1];
+       if (targetBot) {
+         room.players = room.players.filter(p => p.id !== targetBot.id);
+         broadcastRoom(currentRoomId);
+         checkStartDeal(room);
+       }
+    }
+  });
+
+  // Add a single Bot
+  socket.on('room:add_bot', () => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room || room.phase !== 'betting') return;
+    
+    const player = room.players.find(p => p.id === socket.id);
+    if (player && player.isHost && room.players.length < 9) {
+       addBotToServerRoom(room);
+       broadcastRoom(currentRoomId);
+       checkStartDeal(room);
+    }
+  });
+
   // Chat message
   socket.on('chat:send', ({ text }) => {
     if (!currentRoomId || !text || !text.trim()) return;
@@ -905,15 +1248,18 @@ io.on('connection', (socket: Socket) => {
       });
     }
 
-    if (room.players.length === 0) {
+    if (room.players.length === 0 || room.players.every(p => p.isBot)) {
       if (room.dealerTimer) clearTimeout(room.dealerTimer);
       clearTurnTimer(room);
       rooms.delete(currentRoomId);
     } else {
       // Reassign host if host left
       if (room.hostId === socket.id) {
-        room.hostId = room.players[0].id;
-        room.players[0].isHost = true;
+        const nextRealPlayer = room.players.find(p => !p.isBot);
+        if (nextRealPlayer) {
+            room.hostId = nextRealPlayer.id;
+            nextRealPlayer.isHost = true;
+        }
       }
 
       // If leaving player was currently taking a turn, advance
