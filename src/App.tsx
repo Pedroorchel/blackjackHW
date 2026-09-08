@@ -260,8 +260,8 @@ export default function App() {
     return '';
   });
 
-  const getSocketServerUrl = (overrideUrl?: string) => {
-    if (typeof window === 'undefined') return undefined;
+  const getSocketServerUrl = (overrideUrl?: string): string => {
+    if (typeof window === 'undefined') return '';
     const custom = overrideUrl !== undefined ? overrideUrl : (localStorage.getItem('blackjack_custom_server_url')?.trim() || '');
     if (custom) return custom;
 
@@ -274,7 +274,10 @@ export default function App() {
       return 'https://ais-dev-jmdx2zcehkmkehmm7m4erp-791084157184.us-east1.run.app';
     }
 
-    return undefined;
+    // Always default to current window origin instead of returning undefined,
+    // as Socket.IO client interprets literal undefined as the string "undefined"
+    // resulting in invalid URIs like undefined//undefined//undefined
+    return window.location.origin;
   };
 
   const handleSaveServerUrl = (url: string) => {
