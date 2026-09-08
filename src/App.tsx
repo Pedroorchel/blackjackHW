@@ -266,6 +266,7 @@ export default function App() {
     });
 
     socket.on('room:state', (state: RoomState) => {
+      if (isLocalModeRef.current) return;
       setRoomState(state);
       setIsConnecting(false);
 
@@ -721,11 +722,10 @@ export default function App() {
       const fallbackTimer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
+          setErrorMessage('Não foi possível conectar ao servidor Multiplayer. O servidor pode estar offline.');
           setIsConnecting(false);
         }
-      }, 8000);
+      }, 15000); // 15 seconds to allow for cold start
 
       socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
         if (resolved) return;
@@ -735,14 +735,11 @@ export default function App() {
         if (res.success) {
           isLocalModeRef.current = false;
         } else {
-          // Fallback to local table if server rejected or errored
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
+          setErrorMessage(res.error || 'Erro ao criar a sala no servidor.');
         }
       });
     } else {
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
+      setErrorMessage('Você está desconectado do servidor. O modo Multiplayer não está disponível neste ambiente.');
       setIsConnecting(false);
     }
   };
