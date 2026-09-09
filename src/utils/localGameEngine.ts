@@ -102,7 +102,7 @@ export class LocalGameEngine {
       }
     ];
 
-    const initialChips = Math.max(chips, 100);
+    const initialChips = typeof chips === 'number' ? Math.max(0, chips) : 1000;
 
     this.players = [
       {
@@ -800,17 +800,11 @@ export class LocalGameEngine {
 
     this.players = [...nonBots, ...updatedBots];
 
-    // Reset non-bot players
+    // Reset non-bot players (preserve 0 chips when player lost everything)
     nonBots.forEach(p => {
       p.cards = [];
       p.outcome = null;
       p.payout = 0;
-
-      if (p.chips <= 0) {
-        p.chips = 500;
-        this.emitEvent('info', `${p.name} recarregou fichas do cassino!`);
-      }
-
       p.currentBet = 0;
       p.isReady = false;
       if (p.isSpectator) {
@@ -836,7 +830,7 @@ export class LocalGameEngine {
     const newPlayer: Player = {
       id: playerData.id,
       name: playerData.name || 'Jogador Convidado',
-      chips: Math.max(playerData.chips ?? 1000, 100),
+      chips: typeof playerData.chips === 'number' ? Math.max(0, playerData.chips) : 1000,
       currentBet: 0,
       cards: [],
       status: 'spectator',

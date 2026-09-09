@@ -95,7 +95,11 @@ export class SupabaseRealtimeBridge {
         // If guest, announce arrival to the host with accurate profile
         if (!this.isHost) {
           const guestName = profile?.name || localStorage.getItem('blackjack_player_name') || 'Jogador Convidado';
-          const guestChips = profile?.chips ?? parseInt(localStorage.getItem('blackjack_guest_chips') || '1000', 10);
+          const guestChips = typeof profile?.chips === 'number' 
+            ? profile.chips 
+            : (localStorage.getItem('blackjack_guest_chips') !== null 
+                ? parseInt(localStorage.getItem('blackjack_guest_chips')!, 10) 
+                : 1000);
           const guestWins = profile?.wins ?? parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
           const guestAvatar = profile?.avatarUrl ?? (localStorage.getItem('blackjack_player_avatar') || '');
 

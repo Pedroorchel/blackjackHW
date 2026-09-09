@@ -651,7 +651,7 @@ io.on('connection', (socket: Socket) => {
     const newPlayer: Player = {
       id: socket.id,
       name: playerName.trim() || 'Jogador 1',
-      chips: typeof chips === 'number' ? Math.min(250000, chips) : 500,
+      chips: typeof chips === 'number' ? Math.max(0, Math.min(250000, chips)) : 500,
       currentBet: 0,
       cards: [],
       status: 'betting',
@@ -726,7 +726,7 @@ io.on('connection', (socket: Socket) => {
       const newPlayer: Player = {
         id: socket.id,
         name: playerName.trim() || `Jogador ${room.players.length + 1}`,
-        chips: typeof chips === 'number' && chips > 0 ? Math.min(250000, chips) : 500,
+        chips: typeof chips === 'number' ? Math.max(0, Math.min(250000, chips)) : 500,
         currentBet: 0,
         cards: [],
         status: isSeated ? (room.phase === 'betting' ? 'betting' : 'waiting') : 'spectator',

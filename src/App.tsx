@@ -256,6 +256,71 @@ export default function App() {
     return () => clearInterval(interval);
   }, [roomState?.activePlayerId, roomState?.turnStartTime, roomState?.phase]);
 
+  const persistUserGameData = useCallback(async (self: { name: string; chips: number; wins?: number }) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: curProf } = await supabase
+          .from('profiles')
+          .select('name, playtime_seconds, longest_session_seconds, wins, chips')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const isOrchel = user.id === '3039762a-3c9d-476a-b870-2b141182526d' || 
+                         user.email?.toLowerCase() === 'orchel@gmail.com' ||
+                         curProf?.name?.toLowerCase() === 'orchel';
+
+        const minFloor = isOrchel ? 32400 : 0;
+        const safePlaytime = Math.max(
+          Number(curProf?.playtime_seconds) || 0,
+          Math.floor(totalPlaytimeRef.current),
+          minFloor
+        );
+        const safeLongest = Math.max(
+          Number(curProf?.longest_session_seconds) || 0,
+          Math.floor(sessionSecondsRef.current),
+          isOrchel ? 7200 : 0
+        );
+
+        persistPlaytime(safePlaytime, safeLongest, user.id);
+
+        const safeChips = isOrchel ? Math.max(self.chips, 20000) : Math.max(0, self.chips);
+        const safeWins = Math.max(self.wins || 0, curProf?.wins || 0, isOrchel ? 35 : 0);
+
+        await supabase
+          .from('profiles')
+          .update({
+            wins: safeWins,
+            chips: safeChips,
+            playtime_seconds: safePlaytime,
+            longest_session_seconds: safeLongest,
+            last_played_at: new Date().toISOString()
+          })
+          .eq('id', user.id);
+      } else {
+        // Guest profile persistence: save exact chips (including 0 when money is lost!)
+        if (typeof window !== 'undefined') {
+          const savedGuestRaw = localStorage.getItem('blackjack_guest_profile');
+          let gp = savedGuestRaw ? JSON.parse(savedGuestRaw) : {};
+          gp.name = self.name || gp.name || 'Jogador Convidado';
+          gp.chips = Math.max(0, self.chips);
+          gp.wins = self.wins || gp.wins || 0;
+          gp.playtime_seconds = Math.floor(totalPlaytimeRef.current);
+          gp.longest_session_seconds = Math.max(gp.longest_session_seconds || 0, Math.floor(sessionSecondsRef.current));
+          gp.last_played_at = new Date().toISOString();
+
+          localStorage.setItem('blackjack_guest_profile', JSON.stringify(gp));
+          localStorage.setItem('blackjack_guest_chips', String(Math.max(0, self.chips)));
+          localStorage.setItem('blackjack_guest_wins', String(self.wins || 0));
+          localStorage.setItem('blackjack_player_name', gp.name);
+          persistPlaytime(Math.floor(totalPlaytimeRef.current), Math.floor(sessionSecondsRef.current));
+        }
+      }
+    } catch (e) {
+      console.warn('Error persisting user game data:', e);
+    }
+  }, []);
+
   const handleToggleAutoReady = (value: boolean) => {
     setAutoReady(value);
     if (typeof window !== 'undefined') {
@@ -360,65 +425,7 @@ export default function App() {
         const self = state.players.find(p => p.id === socket?.id);
 
         if (self) {
-          const syncProfile = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              const { data: curProf } = await supabase
-                .from('profiles')
-                .select('name, playtime_seconds, longest_session_seconds, wins, chips')
-                .eq('id', user.id)
-                .maybeSingle();
-
-              const isOrchel = user.id === '3039762a-3c9d-476a-b870-2b141182526d' || 
-                               user.email?.toLowerCase() === 'orchel@gmail.com' ||
-                               curProf?.name?.toLowerCase() === 'orchel';
-
-              const minFloor = isOrchel ? 32400 : 0;
-              const safePlaytime = Math.max(
-                Number(curProf?.playtime_seconds) || 0,
-                Math.floor(totalPlaytimeRef.current),
-                minFloor
-              );
-              const safeLongest = Math.max(
-                Number(curProf?.longest_session_seconds) || 0,
-                Math.floor(sessionSecondsRef.current),
-                isOrchel ? 7200 : 0
-              );
-
-              // Update local storage per user
-              persistPlaytime(safePlaytime, safeLongest, user.id);
-
-              await supabase
-                .from('profiles')
-                .update({
-                  wins: Math.max(self.wins || 0, curProf?.wins || 0, isOrchel ? 35 : 0),
-                  chips: isOrchel ? Math.max(self.chips, 20000) : self.chips,
-                  playtime_seconds: safePlaytime,
-                  longest_session_seconds: safeLongest,
-                  last_played_at: new Date().toISOString()
-                })
-                .eq('id', user.id);
-            } else {
-              // Guest profile persistence: continually save guest chips, wins and playtime to localStorage
-              if (typeof window !== 'undefined') {
-                const savedGuestRaw = localStorage.getItem('blackjack_guest_profile');
-                let gp = savedGuestRaw ? JSON.parse(savedGuestRaw) : {};
-                gp.name = self.name || gp.name || 'Jogador Convidado';
-                gp.chips = self.chips;
-                gp.wins = self.wins || gp.wins || 0;
-                gp.playtime_seconds = Math.floor(totalPlaytimeRef.current);
-                gp.longest_session_seconds = Math.max(gp.longest_session_seconds || 0, Math.floor(sessionSecondsRef.current));
-                gp.last_played_at = new Date().toISOString();
-
-                localStorage.setItem('blackjack_guest_profile', JSON.stringify(gp));
-                localStorage.setItem('blackjack_guest_chips', String(self.chips));
-                localStorage.setItem('blackjack_guest_wins', String(self.wins || 0));
-                localStorage.setItem('blackjack_player_name', gp.name);
-                persistPlaytime(Math.floor(totalPlaytimeRef.current), Math.floor(sessionSecondsRef.current));
-              }
-            }
-          };
-          syncProfile();
+          persistUserGameData(self);
         }
 
         // Capture round results for performance/stats tracking - GUARANTEED PER ROUND
@@ -560,6 +567,9 @@ export default function App() {
 
           if (state.phase === 'round_over') {
             const self = state.players.find(p => p.id === 'local-player') || state.players[0];
+            if (self) {
+              persistUserGameData(self);
+            }
             if (self && !self.isSpectator) {
               const roundKey = `${state.roomId}_r${state.roundNumber}_${state.dealer.score}_${self.cards.length}`;
 
@@ -907,14 +917,20 @@ export default function App() {
     realtimeBridge.initRoom(createdRoomId, 'local-player', true, {
       onStateUpdate: (state) => {
         setRoomState(state);
+        if (state.phase === 'round_over') {
+          const self = state.players.find(p => p.id === 'local-player');
+          if (self) {
+            persistUserGameData(self);
+          }
+        }
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
       }
     }, {
       name,
-      chips: chips ?? 1000,
-      wins: wins ?? 0,
+      chips: typeof chips === 'number' ? chips : 1000,
+      wins: typeof wins === 'number' ? wins : 0,
       avatarUrl
     });
 
@@ -1009,14 +1025,25 @@ export default function App() {
     myPlayerIdRef.current = myId;
     isLocalModeRef.current = false; // Guest plays remotely on their own seat
 
-    const guestChips = typeof chips === 'number' ? chips : parseInt(localStorage.getItem('blackjack_guest_chips') || '1000', 10);
-    const guestWins = typeof wins === 'number' ? wins : parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
+    const savedChipsRaw = localStorage.getItem('blackjack_guest_chips');
+    const guestChips = typeof chips === 'number' 
+      ? chips 
+      : (savedChipsRaw !== null && !isNaN(Number(savedChipsRaw)) ? Number(savedChipsRaw) : 1000);
+    const guestWins = typeof wins === 'number' 
+      ? wins 
+      : parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
 
     // Connect to Supabase Realtime channel for live multiplayer
     realtimeBridge.initRoom(cleanRoomId, myId, false, {
       onStateUpdate: (state) => {
         setRoomState(state);
         setIsConnecting(false);
+        if (state.phase === 'round_over') {
+          const self = state.players.find(p => p.id === myId);
+          if (self) {
+            persistUserGameData(self);
+          }
+        }
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
@@ -1063,14 +1090,20 @@ export default function App() {
     realtimeBridge.initRoom(roomId, 'local-player', true, {
       onStateUpdate: (state) => {
         setRoomState(state);
+        if (state.phase === 'round_over') {
+          const self = state.players.find(p => p.id === 'local-player');
+          if (self) {
+            persistUserGameData(self);
+          }
+        }
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
       }
     }, {
       name,
-      chips: chips ?? 1000,
-      wins: wins ?? 0,
+      chips: typeof chips === 'number' ? chips : 1000,
+      wins: typeof wins === 'number' ? wins : 0,
       avatarUrl
     });
 
@@ -1084,6 +1117,9 @@ export default function App() {
   };
 
   const handleLeaveRoom = () => {
+    if (selfPlayer) {
+      persistUserGameData(selfPlayer);
+    }
     persistPlaytime(totalPlaytimeSeconds, sessionSeconds);
     syncPlaytimeToDatabase(totalPlaytimeSeconds, sessionSeconds, true);
     realtimeBridge.leaveRoom();
