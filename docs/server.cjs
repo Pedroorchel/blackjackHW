@@ -423,6 +423,7 @@ function initPublicRooms() {
         hostId: "dealer-host",
         phase: "betting",
         players: [],
+        // Clean 100% human multiplayer table
         activePlayerId: null,
         dealer: {
           cards: [],
@@ -442,11 +443,6 @@ function initPublicRooms() {
         }],
         turnTimeout: 20
       };
-      const bot1 = generateUniqueBot(1, []);
-      bot1.status = "ready";
-      const bot2 = generateUniqueBot(5, [bot1.id]);
-      bot2.status = "ready";
-      room.players = [bot1, bot2];
       rooms.set(cfg.id, room);
     }
   }
@@ -884,8 +880,8 @@ io.on("connection", (socket) => {
     }
     joinRoomInternal(target.roomId, playerName, wins, chips, avatarUrl, callback);
   });
-  socket.on("room:create", ({ playerName, wins, chips, avatarUrl }, callback) => {
-    const roomId = generateRoomCode();
+  socket.on("room:create", ({ playerName, wins, chips, avatarUrl, customRoomId }, callback) => {
+    const roomId = customRoomId && typeof customRoomId === "string" ? customRoomId.trim().toUpperCase() : generateRoomCode();
     currentRoomId = roomId;
     const newPlayer = {
       id: socket.id,

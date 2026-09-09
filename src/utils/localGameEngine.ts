@@ -80,7 +80,16 @@ export class LocalGameEngine {
     customRoomId?: string,
     initialBotsCount: number = 0
   ): string {
-    this.roomId = customRoomId || ('MESA-' + Math.floor(100 + Math.random() * 900));
+    if (customRoomId) {
+      this.roomId = customRoomId.toUpperCase().trim();
+    } else {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      this.roomId = code;
+    }
     this.hostId = 'local-player';
     this.phase = 'betting';
     this.roundNumber = 1;
@@ -88,7 +97,7 @@ export class LocalGameEngine {
       {
         id: 'msg-welcome',
         senderName: 'Dealer VIP',
-        text: `Bem-vindo à Mesa VIP ${this.roomId}! Convide seus amigos enviando o código da sala para jogarem juntos em tempo real.`,
+        text: `Bem-vindo à Mesa VIP #${this.roomId}! Compartilhe este código com seus amigos para jogarem juntos em tempo real.`,
         timestamp: Date.now(),
       }
     ];

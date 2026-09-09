@@ -902,7 +902,7 @@ export default function App() {
 
     // Try socket sync in background if socket server is available
     if (socket && socket.connected) {
-      socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
+      socket.emit('room:create', { playerName: name, wins, chips, avatarUrl, customRoomId: createdRoomId }, (res: { success: boolean; roomId?: string; error?: string }) => {
         if (res && res.success && res.roomId) {
           isLocalModeRef.current = false;
         }

@@ -76,7 +76,7 @@ function initPublicRooms() {
         isPublic: true,
         hostId: 'dealer-host',
         phase: 'betting',
-        players: [],
+        players: [], // Clean 100% human multiplayer table
         activePlayerId: null,
         dealer: {
           cards: [],
@@ -96,13 +96,6 @@ function initPublicRooms() {
         }],
         turnTimeout: 20
       };
-
-      // Populate 2 friendly bots so players have immediate casino atmosphere while waiting for other humans
-      const bot1 = generateUniqueBot(1, []);
-      bot1.status = 'ready';
-      const bot2 = generateUniqueBot(5, [bot1.id]);
-      bot2.status = 'ready';
-      room.players = [bot1, bot2];
 
       rooms.set(cfg.id, room);
     }
@@ -649,8 +642,10 @@ io.on('connection', (socket: Socket) => {
   });
 
   // Create room
-  socket.on('room:create', ({ playerName, wins, chips, avatarUrl }, callback) => {
-    const roomId = generateRoomCode();
+  socket.on('room:create', ({ playerName, wins, chips, avatarUrl, customRoomId }, callback) => {
+    const roomId = (customRoomId && typeof customRoomId === 'string') 
+      ? customRoomId.trim().toUpperCase() 
+      : generateRoomCode();
     currentRoomId = roomId;
 
     const newPlayer: Player = {
