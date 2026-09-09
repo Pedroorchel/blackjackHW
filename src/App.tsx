@@ -75,6 +75,7 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(sounds.isMuted());
   const [isConnecting, setIsConnecting] = useState(false);
   const isLocalModeRef = useRef<boolean>(false);
+  const myPlayerIdRef = useRef<string>('local-player');
   const [loanRequests, setLoanRequests] = useState<{ requesterId: string, requesterName: string, amount: number }[]>([]);
 
   // Account-isolated performance & bankroll history states
@@ -666,18 +667,29 @@ export default function App() {
 
   // Self player & active player memo
   const isSelf = useCallback((playerId: string) => {
-    if (isLocalModeRef.current || !socket?.connected) {
-      return playerId === 'local-player' || playerId === roomState?.players[0]?.id;
-    }
-    return playerId === socket?.id;
+    if (!playerId) return false;
+    const myId = myPlayerIdRef.current;
+    if (myId && playerId === myId) return true;
+    if (socket?.connected && playerId === socket?.id) return true;
+    if (isLocalModeRef.current && playerId === 'local-player') return true;
+    return false;
   }, [roomState]);
 
   const selfPlayer = useMemo(() => {
     if (!roomState) return null;
-    if (isLocalModeRef.current || !socket?.connected) {
-      return roomState.players.find(p => p.id === 'local-player') || roomState.players[0] || null;
+    const myId = myPlayerIdRef.current;
+    if (myId) {
+      const found = roomState.players.find(p => p.id === myId);
+      if (found) return found;
     }
-    return roomState.players.find(p => p.id === socket?.id) || roomState.players[0] || null;
+    if (socket?.connected) {
+      const found = roomState.players.find(p => p.id === socket?.id);
+      if (found) return found;
+    }
+    if (isLocalModeRef.current) {
+      return roomState.players.find(p => p.id === 'local-player') || null;
+    }
+    return null;
   }, [roomState]);
 
   const activePlayer = useMemo(() => {
@@ -883,7 +895,8 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    // Open local VIP table instantly with zero delay
+    // Open local VIP table as host
+    myPlayerIdRef.current = 'local-player';
     isLocalModeRef.current = true;
     const createdRoomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
     const hostState = localGameEngine.getState();
@@ -898,6 +911,11 @@ export default function App() {
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
       }
+    }, {
+      name,
+      chips: chips ?? 1000,
+      wins: wins ?? 0,
+      avatarUrl
     });
 
     // Try socket sync in background if socket server is available
@@ -922,6 +940,7 @@ export default function App() {
     } catch (e) {
       console.warn('Playtime room sync:', e);
     }
+    myPlayerIdRef.current = 'local-player';
     isLocalModeRef.current = true;
     const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
     setRoomState(localGameEngine.getState());
@@ -959,7 +978,7 @@ export default function App() {
   };
 
   const handleJoinRoom = async (roomId: string, name: string, wins?: number, chips?: number) => {
-    setIsConnecting(false);
+    setIsConnecting(true);
     setErrorMessage(null);
     handleUpdatePlayerName(name);
 
@@ -982,15 +1001,19 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    // Open room instantly with zero delay
-    const guestId = `guest-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
-    isLocalModeRef.current = true;
-    localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 0);
-    setRoomState(localGameEngine.getState());
-    setIsConnecting(false);
+    // Determine the guest's own account / identity
+    let myId = currentUserIdRef.current;
+    if (!myId || myId === 'guest') {
+      myId = getActiveAccountId();
+    }
+    myPlayerIdRef.current = myId;
+    isLocalModeRef.current = false; // Guest plays remotely on their own seat
+
+    const guestChips = typeof chips === 'number' ? chips : parseInt(localStorage.getItem('blackjack_guest_chips') || '1000', 10);
+    const guestWins = typeof wins === 'number' ? wins : parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
 
     // Connect to Supabase Realtime channel for live multiplayer
-    realtimeBridge.initRoom(cleanRoomId, guestId, false, {
+    realtimeBridge.initRoom(cleanRoomId, myId, false, {
       onStateUpdate: (state) => {
         setRoomState(state);
         setIsConnecting(false);
@@ -998,11 +1021,16 @@ export default function App() {
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
       }
+    }, {
+      name,
+      chips: guestChips,
+      wins: guestWins,
+      avatarUrl
     });
 
     // Try socket join in background
     if (socket && socket.connected) {
-      socket.emit('room:join', { roomId: cleanRoomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
+      socket.emit('room:join', { roomId: cleanRoomId, playerName: name, wins: guestWins, chips: guestChips, avatarUrl }, (res: { success: boolean; error?: string }) => {
         if (res && res.success) {
           isLocalModeRef.current = false;
         }
@@ -1025,7 +1053,8 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    // Open table instantly with zero delay
+    // Open table as local host
+    myPlayerIdRef.current = 'local-player';
     isLocalModeRef.current = true;
     const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
     setRoomState(localGameEngine.getState());
@@ -1038,6 +1067,11 @@ export default function App() {
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
       }
+    }, {
+      name,
+      chips: chips ?? 1000,
+      wins: wins ?? 0,
+      avatarUrl
     });
 
     if (socket && socket.connected) {
@@ -1136,20 +1170,22 @@ export default function App() {
   const handleTakeSeat = (seatIndex: number) => {
     sounds.playChipBet();
     realtimeBridge.sendAction('take_seat', { seatIndex });
-    if (isLocalModeRef.current || !socket?.connected) {
+    if (isLocalModeRef.current) {
       localGameEngine.takeSeat('local-player', seatIndex);
       return;
     }
+    if (!socket) return;
     socket.emit('player:take_seat', { seatIndex });
   };
 
   const handleStandUp = () => {
     sounds.playChipBet();
     realtimeBridge.sendAction('stand_up');
-    if (isLocalModeRef.current || !socket?.connected) {
+    if (isLocalModeRef.current) {
       localGameEngine.standUp('local-player');
       return;
     }
+    if (!socket) return;
     socket.emit('player:stand_up');
   };
 

@@ -189,13 +189,13 @@ export class LocalGameEngine {
       return false;
     }
 
-    const occupied = this.players.some(p => !p.isSpectator && p.seatIndex === seatIndex && p.id !== playerId && p.id !== 'local-player');
+    const occupied = this.players.some(p => !p.isSpectator && p.seatIndex === seatIndex && p.id !== playerId);
     if (occupied) {
       this.emitEvent('error', `O Assento ${seatIndex + 1} já está ocupado!`);
       return false;
     }
 
-    const player = this.players.find(p => p.id === playerId || (playerId === 'local-player' && p.id === 'local-player'));
+    const player = this.players.find(p => p.id === playerId);
     if (!player) return false;
 
     if (player.status === 'playing') {
@@ -219,13 +219,13 @@ export class LocalGameEngine {
       timestamp: Date.now(),
     });
 
-    this.emitEvent('info', `Você sentou no Assento ${seatIndex + 1}.`);
+    this.emitEvent('info', `${player.name} sentou no Assento ${seatIndex + 1}.`);
     this.emitState();
     return true;
   }
 
   public standUp(playerId: string): boolean {
-    const player = this.players.find(p => p.id === playerId || (playerId === 'local-player' && p.id === 'local-player'));
+    const player = this.players.find(p => p.id === playerId);
     if (!player || player.isSpectator) return false;
 
     if (player.status === 'playing') {
@@ -252,7 +252,7 @@ export class LocalGameEngine {
       timestamp: Date.now(),
     });
 
-    this.emitEvent('info', 'Você agora está no modo espectador.');
+    this.emitEvent('info', `${player.name} agora está no modo espectador.`);
     this.emitState();
     return true;
   }
@@ -297,7 +297,7 @@ export class LocalGameEngine {
   }
 
   public setBet(playerId: string, amount: number) {
-    const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
+    const p = this.players.find(x => x.id === playerId);
     if (!p || this.phase !== 'betting') return;
 
     const validBet = Math.max(0, Math.min(amount, p.chips));
@@ -308,7 +308,7 @@ export class LocalGameEngine {
   }
 
   public toggleReady(playerId: string) {
-    const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
+    const p = this.players.find(x => x.id === playerId);
     if (!p || this.phase !== 'betting') return;
 
     p.isReady = !p.isReady;
@@ -420,7 +420,7 @@ export class LocalGameEngine {
   }
 
   public hit(playerId: string) {
-    const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
+    const p = this.players.find(x => x.id === playerId);
     if (!p || this.phase !== 'player_turns' || this.activePlayerId !== p.id) return;
 
     const card = this.drawCard(false);
@@ -442,7 +442,7 @@ export class LocalGameEngine {
   }
 
   public stand(playerId: string) {
-    const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
+    const p = this.players.find(x => x.id === playerId);
     if (!p || this.phase !== 'player_turns' || this.activePlayerId !== p.id) return;
 
     p.status = 'stand';
@@ -452,7 +452,7 @@ export class LocalGameEngine {
   }
 
   public double(playerId: string) {
-    const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
+    const p = this.players.find(x => x.id === playerId);
     if (!p || this.phase !== 'player_turns' || this.activePlayerId !== p.id || p.cards.length !== 2) return;
 
     if (p.chips < p.currentBet) {

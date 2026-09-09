@@ -21,7 +21,8 @@ export class SupabaseRealtimeBridge {
     roomId: string,
     playerId: string,
     isHost: boolean,
-    callbacks: SupabaseRealtimeBridgeCallbacks
+    callbacks: SupabaseRealtimeBridgeCallbacks,
+    profile?: { name: string; chips: number; wins: number; avatarUrl?: string }
   ) {
     this.leaveRoom();
 
@@ -53,10 +54,21 @@ export class SupabaseRealtimeBridge {
       }
     });
 
-    // If host: listen for guest joins and player actions
+    // If host: listen for guest joins, state requests, and player actions
     this.channel.on('broadcast', { event: 'player_join' }, ({ payload }: { payload: any }) => {
       if (this.isHost && payload) {
         localGameEngine.joinPlayer(payload);
+      }
+    });
+
+    this.channel.on('broadcast', { event: 'request_state' }, () => {
+      if (this.isHost) {
+        const currentState = localGameEngine.getState();
+        this.channel?.send({
+          type: 'broadcast',
+          event: 'room_state',
+          payload: currentState
+        });
       }
     });
 
@@ -80,12 +92,12 @@ export class SupabaseRealtimeBridge {
           joinedAt: Date.now()
         });
 
-        // If guest, immediately announce arrival to the host
+        // If guest, announce arrival to the host with accurate profile
         if (!this.isHost) {
-          const guestName = localStorage.getItem('blackjack_player_name') || 'Jogador Convidado';
-          const guestChips = parseInt(localStorage.getItem('blackjack_guest_chips') || '1000', 10);
-          const guestWins = parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
-          const guestAvatar = localStorage.getItem('blackjack_player_avatar') || '';
+          const guestName = profile?.name || localStorage.getItem('blackjack_player_name') || 'Jogador Convidado';
+          const guestChips = profile?.chips ?? parseInt(localStorage.getItem('blackjack_guest_chips') || '1000', 10);
+          const guestWins = profile?.wins ?? parseInt(localStorage.getItem('blackjack_guest_wins') || '0', 10);
+          const guestAvatar = profile?.avatarUrl ?? (localStorage.getItem('blackjack_player_avatar') || '');
 
           this.channel.send({
             type: 'broadcast',
@@ -97,6 +109,11 @@ export class SupabaseRealtimeBridge {
               wins: guestWins,
               avatarUrl: guestAvatar
             }
+          });
+
+          this.channel.send({
+            type: 'broadcast',
+            event: 'request_state'
           });
         }
       }
