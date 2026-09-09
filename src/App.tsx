@@ -299,9 +299,16 @@ export default function App() {
     }
 
     const serverUrl = getSocketServerUrl(customServerUrl);
+    
+    if (serverUrl && !serverUrl.includes('localhost') && !serverUrl.includes('127.0.0.1')) {
+      try {
+        fetch(`${serverUrl}/api/health`, { method: 'GET', mode: 'cors' }).catch(() => {});
+      } catch (e) {}
+    }
+
     socket = io(serverUrl, {
       transports: ['polling', 'websocket'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 1000
     });
 
@@ -770,13 +777,23 @@ export default function App() {
     }
   };
 
-  const ensureSocketConnected = async (timeoutMs: number = 6000): Promise<boolean> => {
+  const ensureSocketConnected = async (timeoutMs: number = 20000): Promise<boolean> => {
     if (socket && socket.connected) return true;
+    const serverUrl = getSocketServerUrl(customServerUrl);
+    
+    // Wake up sleeping Cloud Run server immediately via lightweight HTTP health check
+    if (serverUrl && !serverUrl.includes('localhost') && !serverUrl.includes('127.0.0.1')) {
+      try {
+        fetch(`${serverUrl}/api/health`, { method: 'GET', mode: 'cors' }).catch(() => {});
+      } catch (e) {
+        // Ignore wakeup errors
+      }
+    }
+
     if (!socket) {
-      const serverUrl = getSocketServerUrl(customServerUrl);
       socket = io(serverUrl, {
         transports: ['polling', 'websocket'],
-        reconnectionAttempts: 10,
+        reconnectionAttempts: 15,
         reconnectionDelay: 1000
       });
     }
