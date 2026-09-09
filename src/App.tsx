@@ -885,7 +885,7 @@ export default function App() {
 
     // Open local VIP table instantly with zero delay
     isLocalModeRef.current = true;
-    const createdRoomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const createdRoomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
     const hostState = localGameEngine.getState();
     setRoomState(hostState);
     setIsConnecting(false);
@@ -985,7 +985,7 @@ export default function App() {
     // Open room instantly with zero delay
     const guestId = `guest-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     isLocalModeRef.current = true;
-    localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
+    localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 0);
     setRoomState(localGameEngine.getState());
     setIsConnecting(false);
 
@@ -1027,7 +1027,7 @@ export default function App() {
 
     // Open table instantly with zero delay
     isLocalModeRef.current = true;
-    const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 0);
     setRoomState(localGameEngine.getState());
     setIsConnecting(false);
 

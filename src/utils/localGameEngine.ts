@@ -88,7 +88,7 @@ export class LocalGameEngine {
       {
         id: 'msg-welcome',
         senderName: 'Dealer VIP',
-        text: `Bem-vindo à Mesa VIP ${this.roomId}! Você pode convidar amigos enviando o código da sala ou adicionar bots para jogar.`,
+        text: `Bem-vindo à Mesa VIP ${this.roomId}! Convide seus amigos enviando o código da sala para jogarem juntos em tempo real.`,
         timestamp: Date.now(),
       }
     ];
@@ -98,17 +98,17 @@ export class LocalGameEngine {
     this.players = [
       {
         id: 'local-player',
-        name: playerName || 'Jogador',
+        name: playerName || 'Jogador (Host)',
         chips: initialChips,
         currentBet: 0,
         cards: [],
-        status: 'spectator',
+        status: 'betting',
         outcome: null,
         payout: 0,
         isHost: true,
         isReady: false,
-        seatIndex: -1,
-        isSpectator: true,
+        seatIndex: 0,
+        isSpectator: false,
         debts: {},
         wins: wins || 0,
         avatarUrl,
@@ -116,7 +116,7 @@ export class LocalGameEngine {
       }
     ];
 
-    // Populate initial bots with completely unique procedural generation
+    // Populate initial bots only if requested (e.g. Solo Bot Mode)
     const count = Math.min(initialBotsCount, 7);
     for (let i = 0; i < count; i++) {
       this.addBot(false);
