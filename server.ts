@@ -8,6 +8,19 @@ import { calculateHandScore, createDeck } from './src/utils/blackjack';
 import { generateUniqueBot, BOT_CHAT_GREETINGS, BOT_WIN_REACTIONS, BOT_BUST_REACTIONS } from './src/utils/botGenerator';
 
 const app = express();
+
+// Enable CORS for all origins (supports GitHub Pages, Vercel, Netlify, etc.)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
 const httpServer = createServer(app);
 const PORT = 3000;
 
