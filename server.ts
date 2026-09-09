@@ -1179,24 +1179,97 @@ io.on('connection', (socket: Socket) => {
     if (!room) return;
 
     const requester = room.players.find(p => p.id === socket.id);
-    const target = room.players.find(p => p.id === targetPlayerId);
+    if (!requester) return;
 
-    if (requester && target) {
-      // Send notification to target
-      io.to(target.id).emit('loan:requested', {
-        requesterId: requester.id,
-        requesterName: requester.name,
-        amount
-      });
+    const loanAmount = Math.max(50, amount || 100);
+
+    // 1. Casino / Dealer advance
+    if (targetPlayerId === 'casino' || targetPlayerId === 'dealer') {
+      requester.chips = Math.min(250000, requester.chips + loanAmount);
+      if (!requester.debts) requester.debts = {};
+      requester.debts['casino'] = (requester.debts['casino'] || 0) + loanAmount;
+
       room.messages.push({
         id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        senderName: 'Mesa',
-        text: `${requester.name} pediu $${amount} emprestado para ${target.name}.`,
+        senderName: 'Dealer VIP',
+        text: `O Cassino VIP concedeu um adiantamento emergencial de $${loanAmount} para ${requester.name}.`,
         timestamp: Date.now(),
         isSystem: true
       });
       io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
+      io.to(currentRoomId).emit('game:event', {
+        type: 'loan',
+        message: `Cassino VIP concedeu $${loanAmount} para ${requester.name}.`
+      });
+      broadcastRoom(currentRoomId);
+      return;
     }
+
+    const target = room.players.find(p => p.id === targetPlayerId);
+    if (!target) return;
+
+    // 2. Bot Target
+    if (target.isBot) {
+      if (target.chips >= loanAmount) {
+        target.chips -= loanAmount;
+        requester.chips = Math.min(250000, requester.chips + loanAmount);
+        if (!requester.debts) requester.debts = {};
+        requester.debts[target.id] = (requester.debts[target.id] || 0) + loanAmount;
+
+        const friendlyMessages = [
+          `Com certeza ${requester.name}, toma aqui $${loanAmount} emprestado! Recupera isso na mesa! 🍀`,
+          `Sem problemas parceiro! Te emprestei $${loanAmount}. Vai com tudo nessa rodada! 💰`,
+          `Toma aqui $${loanAmount} na confiança! Boa sorte! 🃏`
+        ];
+        const botText = friendlyMessages[Math.floor(Math.random() * friendlyMessages.length)];
+
+        room.messages.push({
+          id: `bot-${Date.now()}`,
+          senderName: target.name,
+          text: botText,
+          timestamp: Date.now()
+        });
+        room.messages.push({
+          id: `sys-${Date.now()}`,
+          senderName: 'Mesa',
+          text: `${target.name} emprestou $${loanAmount} para ${requester.name}.`,
+          timestamp: Date.now(),
+          isSystem: true
+        });
+
+        io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 2]);
+        io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
+        io.to(currentRoomId).emit('game:event', {
+          type: 'loan',
+          message: `${target.name} emprestou $${loanAmount} para ${requester.name}.`
+        });
+        broadcastRoom(currentRoomId);
+      } else {
+        room.messages.push({
+          id: `bot-${Date.now()}`,
+          senderName: target.name,
+          text: `Poxa ${requester.name}, estou com poucas fichas agora ($${target.chips}). Não consigo emprestar no momento!`,
+          timestamp: Date.now()
+        });
+        io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
+      }
+      return;
+    }
+
+    // 3. Human Player Target
+    io.to(target.id).emit('loan:requested', {
+      requesterId: requester.id,
+      requesterName: requester.name,
+      amount: loanAmount
+    });
+    room.messages.push({
+      id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      senderName: 'Mesa',
+      text: `${requester.name} pediu $${loanAmount} emprestado para ${target.name}.`,
+      timestamp: Date.now(),
+      isSystem: true
+    });
+    io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
   });
 
   // Loan Respond
@@ -1214,10 +1287,8 @@ io.on('connection', (socket: Socket) => {
         requester.chips = Math.min(250000, requester.chips + amount);
         
         // Update debts
-        if (!requester.debts[lender.id]) {
-          requester.debts[lender.id] = 0;
-        }
-        requester.debts[lender.id] += amount;
+        if (!requester.debts) requester.debts = {};
+        requester.debts[lender.id] = (requester.debts[lender.id] || 0) + amount;
 
         room.messages.push({
           id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1252,12 +1323,34 @@ io.on('connection', (socket: Socket) => {
     if (!room) return;
 
     const repayer = room.players.find(p => p.id === socket.id);
-    const lender = room.players.find(p => p.id === targetPlayerId);
+    if (!repayer || repayer.chips <= 0) return;
 
-    if (repayer && lender && repayer.chips >= amount) {
-      const currentDebt = repayer.debts[lender.id] || 0;
+    if (targetPlayerId === 'casino') {
+      const currentDebt = repayer.debts?.['casino'] || 0;
       if (currentDebt > 0) {
-        const repayAmount = Math.min(amount, currentDebt);
+        const repayAmount = Math.min(amount, currentDebt, repayer.chips);
+        repayer.chips -= repayAmount;
+        repayer.debts['casino'] -= repayAmount;
+        if (repayer.debts['casino'] <= 0) delete repayer.debts['casino'];
+
+        room.messages.push({
+          id: `sys-${Date.now()}`,
+          senderName: 'Dealer VIP',
+          text: `${repayer.name} pagou $${repayAmount} da sua dívida para o Cassino VIP.`,
+          timestamp: Date.now(),
+          isSystem: true
+        });
+        io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
+        broadcastRoom(currentRoomId);
+      }
+      return;
+    }
+
+    const lender = room.players.find(p => p.id === targetPlayerId);
+    if (repayer && lender && repayer.chips >= amount) {
+      const currentDebt = repayer.debts?.[lender.id] || 0;
+      if (currentDebt > 0) {
+        const repayAmount = Math.min(amount, currentDebt, repayer.chips);
         repayer.chips -= repayAmount;
         lender.chips = Math.min(250000, lender.chips + repayAmount);
         repayer.debts[lender.id] -= repayAmount;
@@ -1269,17 +1362,15 @@ io.on('connection', (socket: Socket) => {
         room.messages.push({
           id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           senderName: 'Mesa',
-          text: `${repayer.name} pagou $${repayAmount} de sua dívida para ${lender.name}.`,
+          text: `${repayer.name} pagou $${repayAmount} da sua dívida para ${lender.name}.`,
           timestamp: Date.now(),
           isSystem: true
         });
         io.to(currentRoomId).emit('chat:message', room.messages[room.messages.length - 1]);
-        
         io.to(currentRoomId).emit('game:event', {
           type: 'loan',
           message: `Você pagou $${repayAmount} para ${lender.name}.`
         });
-
         broadcastRoom(currentRoomId);
       }
     }

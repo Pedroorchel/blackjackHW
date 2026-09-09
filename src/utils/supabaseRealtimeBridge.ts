@@ -7,6 +7,7 @@ export interface SupabaseRealtimeBridgeCallbacks {
   onEvent?: (event: { type: string; message: string }) => void;
   onPeerJoin?: (playerId: string) => void;
   onPeerLeave?: (playerId: string) => void;
+  onLoanRequest?: (payload: { requesterId: string; requesterName: string; amount: number }) => void;
 }
 
 export class SupabaseRealtimeBridge {
@@ -51,6 +52,13 @@ export class SupabaseRealtimeBridge {
     this.channel.on('broadcast', { event: 'game_event' }, ({ payload }: { payload: { type: string; message: string } }) => {
       if (!this.isHost && payload) {
         this.callbacks?.onEvent?.(payload);
+      }
+    });
+
+    // Listen for loan requests
+    this.channel.on('broadcast', { event: 'loan_requested' }, ({ payload }: { payload: { requesterId: string; requesterName: string; amount: number; targetPlayerId?: string } }) => {
+      if (payload && (!payload.targetPlayerId || payload.targetPlayerId === this.playerId)) {
+        this.callbacks?.onLoanRequest?.(payload);
       }
     });
 
@@ -145,6 +153,16 @@ export class SupabaseRealtimeBridge {
               payload: event
             });
           }
+        },
+        onLoanRequest: (loanPayload) => {
+          if (this.channel) {
+            this.channel.send({
+              type: 'broadcast',
+              event: 'loan_requested',
+              payload: loanPayload
+            });
+          }
+          this.callbacks?.onLoanRequest?.(loanPayload);
         }
       });
     }

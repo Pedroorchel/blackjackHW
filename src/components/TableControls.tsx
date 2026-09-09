@@ -23,6 +23,7 @@ interface TableControlsProps {
   onRemoveBot?: () => void;
   onToggleBots?: () => void;
   onStandUp?: () => void;
+  onOpenLoanModal?: () => void;
 }
 
 const CHIP_VALUES = [10, 25, 50, 100, 500];
@@ -45,7 +46,8 @@ export const TableControls: React.FC<TableControlsProps> = ({
   onAddBot,
   onRemoveBot,
   onToggleBots,
-  onStandUp
+  onStandUp,
+  onOpenLoanModal
 }) => {
   const [showViewToggle, setShowViewToggle] = useState(false);
 
@@ -93,7 +95,7 @@ export const TableControls: React.FC<TableControlsProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               {onStandUp && (
                 <button
                   type="button"
@@ -103,6 +105,17 @@ export const TableControls: React.FC<TableControlsProps> = ({
                   title="Levantar do assento e voltar para o modo espectador"
                 >
                   <span>👁️ Levantar</span>
+                </button>
+              )}
+              {onOpenLoanModal && (
+                <button
+                  type="button"
+                  id="btn-loan-controls"
+                  onClick={onOpenLoanModal}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-colors cursor-pointer font-bold flex items-center gap-1 shadow-sm"
+                  title="Pedir dinheiro emprestado ou adiantamento do Cassino"
+                >
+                  <span>💰 Pedir Dinheiro</span>
                 </button>
               )}
               <button
@@ -125,6 +138,31 @@ export const TableControls: React.FC<TableControlsProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Low or Zero chips banner */}
+          {selfPlayer.chips < 10 && onOpenLoanModal && (
+            <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 flex-wrap gap-2.5 animate-pulse">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">💸</span>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wider text-white">
+                    {selfPlayer.chips === 0 ? 'Você está sem fichas na mesa!' : 'Fichas insuficientes para aposta mínima ($10)!'}
+                  </p>
+                  <p className="text-[11px] text-amber-300/90 font-medium">
+                    Peça dinheiro a um bot/jogador da mesa ou receba o adiantamento do Cassino VIP.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-request-loan-banner"
+                onClick={onOpenLoanModal}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg cursor-pointer transition-all active:scale-95 flex items-center gap-1.5 shrink-0"
+              >
+                <span>💰 Pedir Dinheiro</span>
+              </button>
+            </div>
+          )}
 
           {/* Chips Selector */}
           <div className="flex items-center justify-center gap-2 sm:gap-3 py-1 flex-wrap">

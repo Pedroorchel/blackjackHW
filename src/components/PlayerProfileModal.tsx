@@ -13,6 +13,10 @@ interface PlayerProfileModalProps {
   playtimeSeconds?: number;
   onOpenPlaytimeScoreboard?: () => void;
   onOpenStats?: () => void;
+  onRequestLoan?: (amount: number) => void;
+  onRepayLoan?: (amount: number) => void;
+  selfDebtToPlayer?: number;
+  selfChips?: number;
 }
 
 export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
@@ -22,7 +26,11 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   onUpdateProfile,
   playtimeSeconds,
   onOpenPlaytimeScoreboard,
-  onOpenStats
+  onOpenStats,
+  onRequestLoan,
+  onRepayLoan,
+  selfDebtToPlayer = 0,
+  selfChips = 0
 }) => {
   if (!player) return null;
 
@@ -469,6 +477,73 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
               <div className="text-sm font-black text-red-400 font-mono">
                 ${totalDebts.toLocaleString('pt-BR')}
               </div>
+            </div>
+          )}
+
+          {/* Loan Interaction Section for Other Players */}
+          {!isSelf && onRequestLoan && (
+            <div className="bg-gradient-to-br from-amber-500/10 to-yellow-500/5 rounded-xl p-3.5 border border-amber-500/25 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4" /> Empréstimos & Ajuda
+                </span>
+                <span className="text-[11px] text-stone-400">
+                  Saldo dele: <strong className="text-emerald-400 font-bold">${player.chips.toLocaleString()}</strong>
+                </span>
+              </div>
+              
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => onRequestLoan(100)}
+                  disabled={player.chips < 100}
+                  className="flex-1 py-2 px-2.5 rounded-lg bg-amber-600/30 hover:bg-amber-600/40 text-amber-200 border border-amber-500/40 text-xs font-black transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Pedir $100
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRequestLoan(250)}
+                  disabled={player.chips < 250}
+                  className="flex-1 py-2 px-2.5 rounded-lg bg-amber-600/30 hover:bg-amber-600/40 text-amber-200 border border-amber-500/40 text-xs font-black transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Pedir $250
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRequestLoan(500)}
+                  disabled={player.chips < 500}
+                  className="flex-1 py-2 px-2.5 rounded-lg bg-amber-600/30 hover:bg-amber-600/40 text-amber-200 border border-amber-500/40 text-xs font-black transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Pedir $500
+                </button>
+              </div>
+
+              {selfDebtToPlayer > 0 && onRepayLoan && (
+                <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs text-stone-300">
+                    Você deve: <strong className="text-amber-400">${selfDebtToPlayer.toLocaleString()}</strong>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onRepayLoan(Math.min(100, selfDebtToPlayer))}
+                      disabled={selfChips < Math.min(100, selfDebtToPlayer)}
+                      className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Pagar $100
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRepayLoan(selfDebtToPlayer)}
+                      disabled={selfChips < selfDebtToPlayer}
+                      className="px-2.5 py-1 rounded-md bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-black transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Quitar Tudo
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

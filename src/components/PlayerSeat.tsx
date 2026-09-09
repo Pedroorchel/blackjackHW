@@ -219,14 +219,18 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
             ⏱️ {timeLeft}s
           </span>
         )}
-        {/* Hover Actions for Loans */}
+        {/* Actions for Loans */}
         {!isSelf && (canRequestLoan || canRepayLoan) && (
-          <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-max hidden group-hover:flex gap-1 z-40 bg-stone-900/90 backdrop-blur p-1.5 rounded-lg border border-white/20 shadow-xl">
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-max flex gap-1 z-40 bg-stone-900/95 backdrop-blur p-1 rounded-lg border border-amber-500/30 shadow-xl scale-90 sm:scale-100 animate-in fade-in">
             {canRequestLoan && onRequestLoan && (
               <button
                 type="button"
-                onClick={() => onRequestLoan(player.id, 100)}
-                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold rounded cursor-pointer transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRequestLoan(player.id, 100);
+                }}
+                className="px-2 py-0.8 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-white text-[10px] font-black rounded cursor-pointer transition-colors shadow"
+                title={`Pedir $100 emprestado para ${player.name}`}
               >
                 Pedir $100
               </button>
@@ -234,10 +238,14 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
             {canRepayLoan && onRepayLoan && (
               <button
                 type="button"
-                onClick={() => onRepayLoan(player.id, 100)}
-                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded cursor-pointer transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRepayLoan(player.id, 100);
+                }}
+                className="px-2 py-0.8 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded cursor-pointer transition-colors shadow"
+                title={`Pagar $100 para ${player.name}`}
               >
-                Pagar $100 (Deve: ${myDebtToThisPlayer})
+                Pagar $100 (${myDebtToThisPlayer})
               </button>
             )}
           </div>

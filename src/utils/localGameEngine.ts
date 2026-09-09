@@ -10,6 +10,7 @@ import {
 export interface LocalEngineListener {
   onState: (state: RoomState) => void;
   onEvent: (event: { type: string; message: string }) => void;
+  onLoanRequest?: (payload: { requesterId: string; requesterName: string; amount: number }) => void;
 }
 
 export class LocalGameEngine {
@@ -931,7 +932,176 @@ export class LocalGameEngine {
           this.toggleBots();
         }
         break;
+      case 'request_loan':
+        this.requestLoan(playerId, payload?.targetPlayerId, payload?.amount);
+        break;
+      case 'respond_loan':
+        this.respondLoan(playerId, payload?.requesterId, payload?.accept, payload?.amount);
+        break;
+      case 'repay_loan':
+        this.repayLoan(playerId, payload?.targetPlayerId, payload?.amount);
+        break;
     }
+  }
+
+  public requestLoan(requesterId: string, targetPlayerId: string, amount: number = 100) {
+    const requester = this.players.find(p => p.id === requesterId) || 
+                      this.players.find(p => p.id === 'local-player') || 
+                      this.players[0];
+    if (!requester) return;
+
+    // 1. Casino / Dealer emergency reload
+    if (targetPlayerId === 'casino' || targetPlayerId === 'dealer') {
+      const grantAmount = Math.max(50, amount || 500);
+      requester.chips += grantAmount;
+      if (!requester.debts) requester.debts = {};
+      requester.debts['casino'] = (requester.debts['casino'] || 0) + grantAmount;
+
+      this.messages.push({
+        id: 'msg-loan-casino-' + Date.now(),
+        senderName: 'Dealer VIP',
+        text: `O Cassino VIP concedeu um adiantamento emergencial de $${grantAmount} para ${requester.name}. Boa sorte! 🍀`,
+        timestamp: Date.now(),
+        isSystem: true,
+      });
+
+      this.emitEvent('loan', `O Cassino VIP concedeu $${grantAmount} para você!`);
+      this.emitState();
+      return;
+    }
+
+    const target = this.players.find(p => p.id === targetPlayerId);
+    if (!target || target.id === requester.id) return;
+
+    // 2. Bot Target
+    if (target.isBot) {
+      if (target.chips >= amount) {
+        target.chips -= amount;
+        requester.chips += amount;
+        if (!requester.debts) requester.debts = {};
+        requester.debts[target.id] = (requester.debts[target.id] || 0) + amount;
+
+        const friendlyMessages = [
+          `Com certeza ${requester.name}, toma aqui $${amount} emprestado! Recupera isso na mesa! 🍀`,
+          `Sem problemas parceiro! Te emprestei $${amount}. Vai com tudo nessa rodada! 💰`,
+          `Toma aqui $${amount} na confiança! Boa sorte! 🃏`
+        ];
+        const botText = friendlyMessages[Math.floor(Math.random() * friendlyMessages.length)];
+
+        this.messages.push({
+          id: 'msg-bot-loan-' + Date.now(),
+          senderName: target.name,
+          text: botText,
+          timestamp: Date.now(),
+        });
+        this.messages.push({
+          id: 'msg-loan-sys-' + Date.now(),
+          senderName: 'Mesa',
+          text: `${target.name} emprestou $${amount} para ${requester.name}.`,
+          timestamp: Date.now(),
+          isSystem: true,
+        });
+
+        this.emitEvent('loan', `${target.name} te emprestou $${amount}!`);
+        this.emitState();
+      } else {
+        this.messages.push({
+          id: 'msg-bot-decl-' + Date.now(),
+          senderName: target.name,
+          text: `Poxa ${requester.name}, estou com poucas fichas agora ($${target.chips}). Não consigo emprestar no momento!`,
+          timestamp: Date.now(),
+        });
+        this.emitEvent('info', `${target.name} não tem fichas suficientes para emprestar.`);
+        this.emitState();
+      }
+      return;
+    }
+
+    // 3. Human Player Target
+    this.messages.push({
+      id: 'msg-loan-req-' + Date.now(),
+      senderName: 'Mesa',
+      text: `${requester.name} pediu $${amount} emprestado para ${target.name}.`,
+      timestamp: Date.now(),
+      isSystem: true,
+    });
+    this.listeners.forEach(l => l.onLoanRequest?.({
+      requesterId: requester.id,
+      requesterName: requester.name,
+      amount
+    }));
+    this.emitState();
+  }
+
+  public respondLoan(lenderId: string, requesterId: string, accept: boolean, amount: number) {
+    const lender = this.players.find(p => p.id === lenderId) || this.players.find(p => p.id === 'local-player');
+    const requester = this.players.find(p => p.id === requesterId);
+
+    if (!lender || !requester) return;
+
+    if (accept && lender.chips >= amount) {
+      lender.chips -= amount;
+      requester.chips += amount;
+      if (!requester.debts) requester.debts = {};
+      requester.debts[lender.id] = (requester.debts[lender.id] || 0) + amount;
+
+      this.messages.push({
+        id: 'msg-loan-acc-' + Date.now(),
+        senderName: 'Mesa',
+        text: `${lender.name} emprestou $${amount} para ${requester.name}.`,
+        timestamp: Date.now(),
+        isSystem: true,
+      });
+      this.emitEvent('loan', `${lender.name} emprestou $${amount} para ${requester.name}.`);
+    } else if (!accept) {
+      this.messages.push({
+        id: 'msg-loan-rec-' + Date.now(),
+        senderName: 'Mesa',
+        text: `${lender.name} recusou o empréstimo para ${requester.name}.`,
+        timestamp: Date.now(),
+        isSystem: true,
+      });
+    }
+    this.emitState();
+  }
+
+  public repayLoan(repayerId: string, targetPlayerId: string, amount: number) {
+    const repayer = this.players.find(p => p.id === repayerId) || this.players.find(p => p.id === 'local-player');
+    if (!repayer) return;
+
+    const currentDebt = repayer.debts?.[targetPlayerId] || 0;
+    if (currentDebt <= 0) {
+      this.emitEvent('info', 'Você não tem dívidas pendentes com este destinatário.');
+      return;
+    }
+
+    const repayAmount = Math.min(amount, currentDebt, repayer.chips);
+    if (repayAmount <= 0) {
+      this.emitEvent('error', 'Fichas insuficientes para pagar o empréstimo.');
+      return;
+    }
+
+    repayer.chips -= repayAmount;
+    repayer.debts[targetPlayerId] -= repayAmount;
+
+    let targetName = 'Cassino VIP';
+    if (targetPlayerId !== 'casino') {
+      const targetPlayer = this.players.find(p => p.id === targetPlayerId);
+      if (targetPlayer) {
+        targetPlayer.chips += repayAmount;
+        targetName = targetPlayer.name;
+      }
+    }
+
+    this.messages.push({
+      id: 'msg-repay-' + Date.now(),
+      senderName: 'Mesa',
+      text: `${repayer.name} pagou $${repayAmount} da sua dívida para ${targetName}.`,
+      timestamp: Date.now(),
+      isSystem: true,
+    });
+    this.emitEvent('info', `Você pagou $${repayAmount} da sua dívida para ${targetName}.`);
+    this.emitState();
   }
 
   public sendMessage(senderName: string, text: string) {

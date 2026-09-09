@@ -12,11 +12,12 @@ import { TableChat } from './components/TableChat';
 import { RulesModal } from './components/RulesModal';
 import { LocalSetupModal } from './components/LocalSetupModal';
 import { Leaderboard } from './components/Leaderboard';
-import { Volume2, VolumeX, Share2, Check, LogOut, BookOpen, Terminal, Users, Sparkles, Eye, Settings, Clock, Timer, TrendingUp } from 'lucide-react';
+import { Volume2, VolumeX, Share2, Check, LogOut, BookOpen, Terminal, Users, Sparkles, Eye, Settings, Clock, Timer, TrendingUp, Landmark } from 'lucide-react';
 import { SettingsModal } from './components/SettingsModal';
 import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { PlayerListModal } from './components/PlayerListModal';
 import { PlaytimeScoreboardModal } from './components/PlaytimeScoreboardModal';
+import { LoanModal } from './components/LoanModal';
 import { Player } from './types';
 import { StatsDrawer } from './components/StatsDrawer';
 import { calculateHandScore } from './utils/blackjack';
@@ -77,6 +78,7 @@ export default function App() {
   const isLocalModeRef = useRef<boolean>(false);
   const myPlayerIdRef = useRef<string>('local-player');
   const [loanRequests, setLoanRequests] = useState<{ requesterId: string, requesterName: string, amount: number }[]>([]);
+  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
 
   // Account-isolated performance & bankroll history states
   const [handHistory, setHandHistory] = useState<HandHistoryItem[]>(() => {
@@ -728,6 +730,13 @@ export default function App() {
             sounds.playWin();
             break;
         }
+      },
+      onLoanRequest: (payload) => {
+        setLoanRequests(prev => {
+          if (prev.some(r => r.requesterId === payload.requesterId)) return prev;
+          return [...prev, payload];
+        });
+        sounds.playChipBet();
       }
     });
 
@@ -814,19 +823,43 @@ export default function App() {
   }, [roomState?.phase, roomState?.roundNumber, autoReady, selfPlayer]);
 
   const handleRespondLoan = (requesterId: string, accept: boolean, amount: number) => {
-    if (!socket) return;
-    socket.emit('loan:respond', { requesterId, accept, amount });
+    sounds.playChipBet();
+    const myId = selfPlayer?.id || myPlayerIdRef.current || 'local-player';
     setLoanRequests(prev => prev.filter(req => req.requesterId !== requesterId));
+    realtimeBridge.sendAction('respond_loan', { requesterId, accept, amount });
+    if (isLocalModeRef.current) {
+      localGameEngine.respondLoan(myId, requesterId, accept, amount);
+      return;
+    }
+    if (socket && socket.connected) {
+      socket.emit('loan:respond', { requesterId, accept, amount });
+    }
   };
 
   const handleRequestLoan = (targetPlayerId: string, amount: number) => {
-    if (!socket) return;
-    socket.emit('loan:request', { targetPlayerId, amount });
+    sounds.playChipBet();
+    const myId = selfPlayer?.id || myPlayerIdRef.current || 'local-player';
+    realtimeBridge.sendAction('request_loan', { targetPlayerId, amount });
+    if (isLocalModeRef.current) {
+      localGameEngine.requestLoan(myId, targetPlayerId, amount);
+      return;
+    }
+    if (socket && socket.connected) {
+      socket.emit('loan:request', { targetPlayerId, amount });
+    }
   };
 
   const handleRepayLoan = (targetPlayerId: string, amount: number) => {
-    if (!socket) return;
-    socket.emit('loan:repay', { targetPlayerId, amount });
+    sounds.playChipBet();
+    const myId = selfPlayer?.id || myPlayerIdRef.current || 'local-player';
+    realtimeBridge.sendAction('repay_loan', { targetPlayerId, amount });
+    if (isLocalModeRef.current) {
+      localGameEngine.repayLoan(myId, targetPlayerId, amount);
+      return;
+    }
+    if (socket && socket.connected) {
+      socket.emit('loan:repay', { targetPlayerId, amount });
+    }
   };
 
   const handleUpdatePlayerName = (name: string) => {
@@ -985,6 +1018,13 @@ export default function App() {
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
+      },
+      onLoanRequest: (payload) => {
+        setLoanRequests(prev => {
+          if (prev.some(r => r.requesterId === payload.requesterId)) return prev;
+          return [...prev, payload];
+        });
+        sounds.playChipBet();
       }
     }, {
       name,
@@ -1106,6 +1146,13 @@ export default function App() {
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
+      },
+      onLoanRequest: (payload) => {
+        setLoanRequests(prev => {
+          if (prev.some(r => r.requesterId === payload.requesterId)) return prev;
+          return [...prev, payload];
+        });
+        sounds.playChipBet();
       }
     }, {
       name,
@@ -1158,6 +1205,13 @@ export default function App() {
       },
       onEvent: (event) => {
         handleGameEvent(event.type, event.message);
+      },
+      onLoanRequest: (payload) => {
+        setLoanRequests(prev => {
+          if (prev.some(r => r.requesterId === payload.requesterId)) return prev;
+          return [...prev, payload];
+        });
+        sounds.playChipBet();
       }
     }, {
       name,
@@ -1428,6 +1482,18 @@ export default function App() {
             >
               <Users className="w-3.5 h-3.5 text-emerald-400" />
               <span>{roomState.players.length} {roomState.players.length === 1 ? 'Jogador' : 'Jogadores'}</span>
+            </button>
+
+            {/* Loan Bank Button in Header */}
+            <button
+              type="button"
+              id="btn-header-loans"
+              onClick={() => setIsLoanModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] font-bold cursor-pointer transition-all shadow-sm"
+              title="Pedir Dinheiro ou Adiantamento VIP"
+            >
+              <Landmark className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pedir Dinheiro</span>
             </button>
 
             {/* Self Profile & Avatar Button */}
@@ -1721,6 +1787,7 @@ export default function App() {
             onRemoveBot={handleRemoveBot}
             onToggleBots={handleToggleBots}
             onStandUp={handleStandUp}
+            onOpenLoanModal={() => setIsLoanModalOpen(true)}
           />
         )}
       </footer>
@@ -1818,8 +1885,22 @@ export default function App() {
             setSelectedProfilePlayer(null);
             setIsStatsOpen(true);
           }}
+          onRequestLoan={(amount) => handleRequestLoan(selectedProfilePlayer.id, amount)}
+          onRepayLoan={(amount) => handleRepayLoan(selectedProfilePlayer.id, amount)}
+          selfDebtToPlayer={selfPlayer?.debts?.[selectedProfilePlayer.id] || 0}
+          selfChips={selfPlayer?.chips || 0}
         />
       )}
+
+      {/* BANCO DE EMPRÉSTIMOS E ADIANTAMENTO VIP */}
+      <LoanModal
+        isOpen={isLoanModalOpen}
+        onClose={() => setIsLoanModalOpen(false)}
+        players={roomState?.players || []}
+        selfPlayer={selfPlayer}
+        onRequestLoan={handleRequestLoan}
+        onRepayLoan={handleRepayLoan}
+      />
 
       {/* PLACAR DE TEMPO DE JOGO (DIAS, HORAS, MINUTOS E SEGUNDOS) */}
       <PlaytimeScoreboardModal
