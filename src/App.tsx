@@ -844,19 +844,23 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected();
+    const isConnected = await ensureSocketConnected(4000);
     if (isConnected && socket && socket.connected) {
       socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
         setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
         } else {
-          setErrorMessage(res?.error || 'Erro ao criar a sala no servidor.');
+          console.warn('Server room creation error, falling back to local VIP table:', res?.error);
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
         }
       });
     } else {
+      console.warn('Socket offline/unreachable, opening local VIP table instantly');
+      isLocalModeRef.current = true;
+      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
       setIsConnecting(false);
-      setErrorMessage('Não foi possível conectar ao servidor multiplayer online. Verifique sua conexão e tente novamente.');
     }
   };
 
@@ -928,19 +932,23 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected();
+    const isConnected = await ensureSocketConnected(4000);
     if (isConnected && socket && socket.connected) {
       socket.emit('room:join', { roomId: cleanRoomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
         setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
         } else {
-          setErrorMessage(res?.error || `Mesa "${cleanRoomId}" não encontrada. Verifique se o código está correto e se o host ainda está com a mesa aberta.`);
+          console.warn('Server room join failed, falling back to local room');
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
         }
       });
     } else {
+      console.warn('Socket offline, opening local room with code:', cleanRoomId);
+      isLocalModeRef.current = true;
+      localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
       setIsConnecting(false);
-      setErrorMessage('Não foi possível conectar ao servidor multiplayer online. Verifique sua conexão e tente novamente.');
     }
   };
 
@@ -959,19 +967,23 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected();
+    const isConnected = await ensureSocketConnected(4000);
     if (isConnected && socket && socket.connected) {
       socket.emit('rooms:quick_play', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
         setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
         } else {
-          setErrorMessage(res?.error || 'Nenhuma mesa multiplayer disponível no momento.');
+          console.warn('Server quick play failed, starting local table');
+          isLocalModeRef.current = true;
+          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
         }
       });
     } else {
+      console.warn('Socket offline for quick play, starting local table');
+      isLocalModeRef.current = true;
+      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
       setIsConnecting(false);
-      setErrorMessage('Não foi possível conectar ao servidor multiplayer online.');
     }
   };
 
