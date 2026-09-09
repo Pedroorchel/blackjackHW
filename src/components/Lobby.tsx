@@ -583,6 +583,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
+    setLocalError('');
     const finalName = name.trim() || 'Jogador';
     onUpdatePlayerName(finalName);
     onCreateRoom(finalName, userProfile?.wins, userProfile?.chips);
@@ -590,6 +591,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handlePlayBots = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    setLocalError('');
     const finalName = name.trim() || 'Jogador';
     onUpdatePlayerName(finalName);
     if (onPlayWithBots) {
@@ -601,6 +603,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
+    setLocalError('');
     let cleanCode = roomCode.trim().toUpperCase();
     if (cleanCode.includes('ROOM=')) {
       const match = cleanCode.match(/ROOM=([A-Z0-9]+)/i);
@@ -609,7 +612,10 @@ export const Lobby: React.FC<LobbyProps> = ({
     if (cleanCode.startsWith('#')) {
       cleanCode = cleanCode.substring(1);
     }
-    if (!cleanCode) return;
+    if (!cleanCode) {
+      setLocalError('Digite o código da sala para entrar.');
+      return;
+    }
     const finalName = name.trim() || 'Jogador';
     onUpdatePlayerName(finalName);
     onJoinRoom(cleanCode, finalName, userProfile?.wins, userProfile?.chips);
@@ -758,15 +764,15 @@ export const Lobby: React.FC<LobbyProps> = ({
 
             {/* Error Message banner */}
             {(errorMessage || localError) && (
-              <div className="mb-6 p-4 bg-red-950/50 border border-red-500/30 rounded-xl text-red-200 text-sm text-center font-medium animate-shake">
+              <div className="mb-6 p-4 bg-red-950/50 border border-red-500/30 rounded-xl text-red-200 text-sm text-center font-medium animate-shake relative">
+                <button
+                  type="button"
+                  onClick={() => setLocalError('')}
+                  className="absolute top-2 right-3 text-stone-400 hover:text-white text-xs cursor-pointer"
+                >
+                  ✕
+                </button>
                 <div>{errorMessage || localError}</div>
-                {(errorMessage || localError)?.includes('Não foi possível conectar ao servidor') && (
-                  <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200 leading-relaxed max-w-2xl mx-auto text-left">
-                    <span className="font-bold block text-amber-400 mb-1">💡 Dica para o Google AI Studio:</span>
-                    O visualizador integrado do AI Studio (iframe) bloqueia cookies de terceiros por padrão, impedindo a conexão multiplayer.
-                    Para jogar multiplayer, basta clicar em <strong className="text-white">"Open in new tab"</strong> (Abrir em nova aba) no canto superior direito do visualizador para liberar a conexão em tempo real!
-                  </div>
-                )}
               </div>
             )}
 
@@ -791,8 +797,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <button
                     type="button"
                     onClick={handleCreate}
-                    disabled={isConnecting}
-                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.15em] text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-stone-950 shadow-[0_4px_25px_rgba(16,185,129,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0 cursor-pointer"
+                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.15em] text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-stone-950 shadow-[0_4px_25px_rgba(16,185,129,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 cursor-pointer active:scale-95"
                   >
                     <PlusCircle className="w-5 h-5 text-stone-950" />
                     Abrir Mesa VIP
@@ -803,8 +808,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     type="button"
                     id="btn-play-bots-under-create"
                     onClick={handlePlayBots}
-                    disabled={isConnecting}
-                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.12em] text-xs sm:text-sm bg-gradient-to-r from-cyan-950/90 via-cyan-900/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-300 border border-cyan-500/50 hover:border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 cursor-pointer"
+                    className="w-full py-3.5 px-6 rounded-xl font-black uppercase tracking-[0.12em] text-xs sm:text-sm bg-gradient-to-r from-cyan-950/90 via-cyan-900/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-300 border border-cyan-500/50 hover:border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.25)] flex items-center justify-center gap-3 transition-all hover:-translate-y-0.5 cursor-pointer active:scale-95"
                   >
                     <span className="text-lg">🤖</span>
                     <span>Jogar contra Bots de IA (Treino Solo)</span>

@@ -21,6 +21,7 @@ import { Player } from './types';
 import { StatsDrawer } from './components/StatsDrawer';
 import { calculateHandScore } from './utils/blackjack';
 import { localGameEngine } from './utils/localGameEngine';
+import { realtimeBridge } from './utils/supabaseRealtimeBridge';
 import { 
   getStoredHandHistory,
   getStoredBankrollHistory,
@@ -174,6 +175,16 @@ export default function App() {
         setTodaySeconds(getStoredTodayPlaytime());
       }
     });
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      if (roomParam) {
+        setTimeout(() => {
+          handleJoinRoom(roomParam, playerName);
+        }, 300);
+      }
+    }
 
     return () => {
       subscription.unsubscribe();
@@ -680,6 +691,8 @@ export default function App() {
     roomState.players.filter(p => !p.isSpectator).every(p => p.isReady || p.chips === 0);
 
   const handleBetChange = (amount: number) => {
+    sounds.playChipBet();
+    realtimeBridge.sendAction('bet', { amount });
     if (isLocalModeRef.current) {
       localGameEngine.setBet('local-player', amount);
       return;
@@ -690,6 +703,7 @@ export default function App() {
 
   const handleReadyToggle = () => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('ready');
     if (isLocalModeRef.current) {
       localGameEngine.toggleReady('local-player');
       return;
@@ -829,8 +843,33 @@ export default function App() {
     });
   };
 
+  const handleGameEvent = (type: string, message?: string) => {
+    switch (type) {
+      case 'deal':
+      case 'hit':
+      case 'dealer_hit':
+        sounds.playCardDeal();
+        break;
+      case 'dealer_flip':
+        sounds.playCardFlip();
+        break;
+      case 'bust':
+        sounds.playBust();
+        break;
+      case 'blackjack':
+        sounds.playBlackjack();
+        break;
+      case 'round_end':
+      case 'round_over':
+      case 'win':
+      case 'loan':
+        sounds.playWin();
+        break;
+    }
+  };
+
   const handleCreateRoom = async (name: string, wins?: number, chips?: number) => {
-    setIsConnecting(true);
+    setIsConnecting(false);
     setErrorMessage(null);
     handleUpdatePlayerName(name);
 
@@ -846,8 +885,20 @@ export default function App() {
 
     // Open local VIP table instantly with zero delay
     isLocalModeRef.current = true;
-    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const createdRoomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const hostState = localGameEngine.getState();
+    setRoomState(hostState);
     setIsConnecting(false);
+
+    // Initialize Supabase Realtime bridge so friends can join from any device
+    realtimeBridge.initRoom(createdRoomId, 'local-player', true, {
+      onStateUpdate: (state) => {
+        setRoomState(state);
+      },
+      onEvent: (event) => {
+        handleGameEvent(event.type, event.message);
+      }
+    });
 
     // Try socket sync in background if socket server is available
     if (socket && socket.connected) {
@@ -860,7 +911,7 @@ export default function App() {
   };
 
   const handlePlayWithBots = async (name: string, wins?: number, chips?: number) => {
-    setIsConnecting(true);
+    setIsConnecting(false);
     setErrorMessage(null);
     try {
       const res = await fetchAndSyncPlaytimeFromDatabase();
@@ -872,12 +923,14 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
     isLocalModeRef.current = true;
-    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    setRoomState(localGameEngine.getState());
     setIsConnecting(false);
   };
 
   const handleAddBot = () => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('add_bot');
     if (isLocalModeRef.current || !socket?.connected) {
       localGameEngine.addBot();
     } else {
@@ -887,6 +940,7 @@ export default function App() {
 
   const handleRemoveBot = (botId?: string) => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('remove_bot', { botId });
     if (isLocalModeRef.current || !socket?.connected) {
       localGameEngine.removeBot(botId);
     } else {
@@ -896,6 +950,7 @@ export default function App() {
 
   const handleToggleBots = () => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('toggle_bots');
     if (isLocalModeRef.current || !socket?.connected) {
       localGameEngine.toggleBots();
     } else {
@@ -904,7 +959,7 @@ export default function App() {
   };
 
   const handleJoinRoom = async (roomId: string, name: string, wins?: number, chips?: number) => {
-    setIsConnecting(true);
+    setIsConnecting(false);
     setErrorMessage(null);
     handleUpdatePlayerName(name);
 
@@ -927,10 +982,23 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    // Open local room instantly with zero delay
+    // Open room instantly with zero delay
+    const guestId = `guest-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     isLocalModeRef.current = true;
     localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
+    setRoomState(localGameEngine.getState());
     setIsConnecting(false);
+
+    // Connect to Supabase Realtime channel for live multiplayer
+    realtimeBridge.initRoom(cleanRoomId, guestId, false, {
+      onStateUpdate: (state) => {
+        setRoomState(state);
+        setIsConnecting(false);
+      },
+      onEvent: (event) => {
+        handleGameEvent(event.type, event.message);
+      }
+    });
 
     // Try socket join in background
     if (socket && socket.connected) {
@@ -943,7 +1011,7 @@ export default function App() {
   };
 
   const handleQuickPlay = async (name: string, wins?: number, chips?: number) => {
-    setIsConnecting(true);
+    setIsConnecting(false);
     setErrorMessage(null);
     handleUpdatePlayerName(name);
 
@@ -957,10 +1025,20 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    // Open local table instantly with zero delay
+    // Open table instantly with zero delay
     isLocalModeRef.current = true;
-    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    const roomId = localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    setRoomState(localGameEngine.getState());
     setIsConnecting(false);
+
+    realtimeBridge.initRoom(roomId, 'local-player', true, {
+      onStateUpdate: (state) => {
+        setRoomState(state);
+      },
+      onEvent: (event) => {
+        handleGameEvent(event.type, event.message);
+      }
+    });
 
     if (socket && socket.connected) {
       socket.emit('rooms:quick_play', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
@@ -974,6 +1052,7 @@ export default function App() {
   const handleLeaveRoom = () => {
     persistPlaytime(totalPlaytimeSeconds, sessionSeconds);
     syncPlaytimeToDatabase(totalPlaytimeSeconds, sessionSeconds, true);
+    realtimeBridge.leaveRoom();
     if (socket && !isLocalModeRef.current) {
       socket.emit('room:leave');
     }
@@ -991,6 +1070,7 @@ export default function App() {
 
   const handleStartDeal = () => {
     sounds.playCardDeal();
+    realtimeBridge.sendAction('start_deal');
     if (isLocalModeRef.current) {
       localGameEngine.startDeal();
       return;
@@ -1001,6 +1081,7 @@ export default function App() {
 
   const handleHit = () => {
     sounds.playCardDeal();
+    realtimeBridge.sendAction('hit');
     if (isLocalModeRef.current) {
       localGameEngine.hit('local-player');
       return;
@@ -1010,6 +1091,7 @@ export default function App() {
   };
 
   const handleStand = () => {
+    realtimeBridge.sendAction('stand');
     if (isLocalModeRef.current) {
       localGameEngine.stand('local-player');
       return;
@@ -1020,6 +1102,7 @@ export default function App() {
 
   const handleDouble = () => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('double');
     if (isLocalModeRef.current) {
       localGameEngine.double('local-player');
       return;
@@ -1029,6 +1112,7 @@ export default function App() {
   };
 
   const handleNewRound = () => {
+    realtimeBridge.sendAction('new_round');
     if (isLocalModeRef.current) {
       localGameEngine.newRound();
       return;
@@ -1038,6 +1122,7 @@ export default function App() {
   };
 
   const handleSendMessage = (text: string) => {
+    realtimeBridge.sendAction('chat', { senderName: selfPlayer?.name || playerName, text });
     if (isLocalModeRef.current) {
       localGameEngine.sendMessage(selfPlayer?.name || playerName, text);
       return;
@@ -1048,6 +1133,7 @@ export default function App() {
 
   const handleTakeSeat = (seatIndex: number) => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('take_seat', { seatIndex });
     if (isLocalModeRef.current || !socket?.connected) {
       localGameEngine.takeSeat('local-player', seatIndex);
       return;
@@ -1057,6 +1143,7 @@ export default function App() {
 
   const handleStandUp = () => {
     sounds.playChipBet();
+    realtimeBridge.sendAction('stand_up');
     if (isLocalModeRef.current || !socket?.connected) {
       localGameEngine.standUp('local-player');
       return;

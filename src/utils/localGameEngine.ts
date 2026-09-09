@@ -804,6 +804,114 @@ export class LocalGameEngine {
     this.emitState();
   }
 
+  public joinPlayer(playerData: { id: string; name: string; avatarUrl?: string; wins?: number; chips?: number }): Player {
+    const existingIndex = this.players.findIndex(p => p.id === playerData.id);
+    if (existingIndex >= 0) {
+      const p = this.players[existingIndex];
+      p.name = playerData.name || p.name;
+      if (playerData.avatarUrl !== undefined) p.avatarUrl = playerData.avatarUrl;
+      this.emitState();
+      return p;
+    }
+
+    const newPlayer: Player = {
+      id: playerData.id,
+      name: playerData.name || 'Jogador Convidado',
+      chips: Math.max(playerData.chips ?? 1000, 100),
+      currentBet: 0,
+      cards: [],
+      status: 'spectator',
+      outcome: null,
+      payout: 0,
+      isHost: false,
+      isReady: false,
+      seatIndex: -1,
+      isSpectator: true,
+      debts: {},
+      wins: playerData.wins || 0,
+      avatarUrl: playerData.avatarUrl,
+      isBot: false,
+    };
+
+    // Try auto-seating in first available seat
+    const takenSeats = new Set(this.players.filter(p => !p.isSpectator).map(p => p.seatIndex));
+    for (let s = 0; s <= 8; s++) {
+      if (!takenSeats.has(s)) {
+        newPlayer.isSpectator = false;
+        newPlayer.seatIndex = s;
+        newPlayer.status = this.phase === 'betting' ? 'betting' : 'waiting';
+        break;
+      }
+    }
+
+    this.players.push(newPlayer);
+    this.messages.push({
+      id: 'msg-join-' + Date.now(),
+      senderName: 'Dealer VIP',
+      text: `👋 ${newPlayer.name} entrou na mesa!`,
+      timestamp: Date.now(),
+    });
+
+    this.emitEvent('info', `${newPlayer.name} entrou na mesa!`);
+    this.emitState();
+    return newPlayer;
+  }
+
+  public leavePlayer(playerId: string) {
+    const p = this.players.find(x => x.id === playerId);
+    if (!p) return;
+    this.players = this.players.filter(x => x.id !== playerId);
+    this.messages.push({
+      id: 'msg-leave-' + Date.now(),
+      senderName: 'Dealer VIP',
+      text: `${p.name} saiu da mesa.`,
+      timestamp: Date.now(),
+    });
+    this.emitEvent('info', `${p.name} saiu da mesa.`);
+    this.emitState();
+  }
+
+  public handleRemoteAction(action: string, playerId: string, payload?: any) {
+    switch (action) {
+      case 'take_seat':
+        this.takeSeat(playerId, payload?.seatIndex ?? 0);
+        break;
+      case 'stand_up':
+        this.standUp(playerId);
+        break;
+      case 'bet':
+        this.setBet(playerId, payload?.amount ?? 0);
+        break;
+      case 'ready':
+        this.toggleReady(playerId);
+        break;
+      case 'hit':
+        this.hit(playerId);
+        break;
+      case 'stand':
+        this.stand(playerId);
+        break;
+      case 'double':
+        this.double(playerId);
+        break;
+      case 'new_round':
+        this.newRound();
+        break;
+      case 'chat':
+        this.sendMessage(payload?.senderName || 'Jogador', payload?.text || '');
+        break;
+      case 'add_bot':
+        this.addBot();
+        break;
+      case 'remove_bot':
+        this.removeBot(payload?.botId);
+        break;
+      case 'toggle_bots':
+        this.toggleBots();
+        break;
+    }
+  }
+
   public sendMessage(senderName: string, text: string) {
     this.messages.push({
       id: 'msg-' + Date.now(),
