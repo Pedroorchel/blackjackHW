@@ -311,23 +311,25 @@ export class LocalGameEngine {
     const p = this.players.find(x => x.id === playerId || x.id === 'local-player');
     if (!p || this.phase !== 'betting') return;
 
-    p.isReady = true;
-    p.status = 'ready';
+    p.isReady = !p.isReady;
+    p.status = p.isReady ? 'ready' : 'betting';
     this.emitState();
-
-    // In local engine / bot table, confirming bet starts the deal immediately
-    setTimeout(() => {
-      if (this.phase === 'betting') {
-        this.startDeal();
-      }
-    }, 150);
   }
 
-  public startDeal() {
+  public startDeal(initiatorId?: string) {
     if (this.phase !== 'betting') return;
 
+    // Only the host / room creator can start the match
+    if (initiatorId && initiatorId !== 'local-player') {
+      const player = this.players.find(p => p.id === initiatorId);
+      if (player && !player.isHost) {
+        this.emitEvent('error', 'Apenas o Criador da Sala (Host) pode iniciar a partida!');
+        return;
+      }
+    }
+
     this.phase = 'dealing';
-    this.emitEvent('deal', 'O Dealer começou a distribuição das cartas!');
+    this.emitEvent('deal', 'O Criador da Sala iniciou a partida! Distribuindo as cartas...');
 
     // Reset hands and deduct bets
     this.dealer = {
@@ -734,7 +736,15 @@ export class LocalGameEngine {
    * Every round, some bots rotate out, new procedural bots join the table,
    * keeping the table constantly evolving with millions of unique combinations!
    */
-  public newRound() {
+  public newRound(initiatorId?: string) {
+    if (initiatorId && initiatorId !== 'local-player') {
+      const player = this.players.find(p => p.id === initiatorId);
+      if (player && !player.isHost) {
+        this.emitEvent('error', 'Apenas o Criador da Sala (Host) pode iniciar uma nova rodada!');
+        return;
+      }
+    }
+
     this.roundNumber += 1;
     this.phase = 'betting';
     this.activePlayerId = null;
@@ -903,20 +913,29 @@ export class LocalGameEngine {
       case 'double':
         this.double(playerId);
         break;
+      case 'start_deal':
+        this.startDeal(playerId);
+        break;
       case 'new_round':
-        this.newRound();
+        this.newRound(playerId);
         break;
       case 'chat':
         this.sendMessage(payload?.senderName || 'Jogador', payload?.text || '');
         break;
       case 'add_bot':
-        this.addBot();
+        if (playerId === this.hostId || playerId === 'local-player' || this.players.find(p => p.id === playerId)?.isHost) {
+          this.addBot();
+        }
         break;
       case 'remove_bot':
-        this.removeBot(payload?.botId);
+        if (playerId === this.hostId || playerId === 'local-player' || this.players.find(p => p.id === playerId)?.isHost) {
+          this.removeBot(payload?.botId);
+        }
         break;
       case 'toggle_bots':
-        this.toggleBots();
+        if (playerId === this.hostId || playerId === 'local-player' || this.players.find(p => p.id === playerId)?.isHost) {
+          this.toggleBots();
+        }
         break;
     }
   }

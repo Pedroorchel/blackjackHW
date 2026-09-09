@@ -1069,10 +1069,11 @@ export default function App() {
   };
 
   const handleStartDeal = () => {
+    if (!isHost) return;
     sounds.playCardDeal();
     realtimeBridge.sendAction('start_deal');
     if (isLocalModeRef.current) {
-      localGameEngine.startDeal();
+      localGameEngine.startDeal('local-player');
       return;
     }
     if (!socket) return;
@@ -1112,9 +1113,10 @@ export default function App() {
   };
 
   const handleNewRound = () => {
+    if (!isHost) return;
     realtimeBridge.sendAction('new_round');
     if (isLocalModeRef.current) {
-      localGameEngine.newRound();
+      localGameEngine.newRound('local-player');
       return;
     }
     if (!socket) return;

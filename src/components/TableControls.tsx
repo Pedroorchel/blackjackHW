@@ -141,26 +141,96 @@ export const TableControls: React.FC<TableControlsProps> = ({
 
           {/* Action buttons in betting */}
           <div className="flex items-center gap-3 mt-1 justify-center flex-wrap">
-            <button
-              type="button"
-              id="btn-confirm-bet"
-              onClick={onReadyToggle}
-              disabled={selfPlayer.isReady || selfPlayer.currentBet <= 0 || selfPlayer.chips <= 0}
-              className={`px-10 py-3.5 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
-                selfPlayer.currentBet > 0 && !selfPlayer.isReady
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 shadow-[0_0_20px_rgba(16,185,129,0.35)]'
-                  : 'bg-stone-800 text-stone-400 border border-white/10 opacity-60 cursor-not-allowed'
-              }`}
-            >
-              <Play className="w-4 h-4 fill-current text-current" />
-              <span>
-                {selfPlayer.isReady
-                  ? '✓ Aposta Confirmada (Iniciando...)'
-                  : selfPlayer.currentBet > 0
-                  ? `✓ Confirmar Aposta ($${selfPlayer.currentBet.toLocaleString()}) e Jogar`
-                  : 'Escolha um valor nas fichas para Jogar'}
-              </span>
-            </button>
+            {isHost ? (
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
+                {!selfPlayer.isReady ? (
+                  <button
+                    type="button"
+                    id="btn-confirm-bet"
+                    onClick={onReadyToggle}
+                    disabled={selfPlayer.currentBet <= 0 || selfPlayer.chips <= 0}
+                    className={`px-8 py-3.5 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
+                      selfPlayer.currentBet > 0
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 shadow-[0_0_20px_rgba(16,185,129,0.35)]'
+                        : 'bg-stone-800 text-stone-400 border border-white/10 opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>
+                      {selfPlayer.currentBet > 0
+                        ? `✓ Confirmar Minha Aposta ($${selfPlayer.currentBet.toLocaleString()})`
+                        : 'Escolha o valor da sua aposta'}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    id="btn-unready-bet"
+                    onClick={onReadyToggle}
+                    className="px-4 py-3 rounded-xl bg-stone-800 hover:bg-stone-700 border border-white/10 text-stone-300 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Alterar Aposta
+                  </button>
+                )}
+
+                {/* Host-exclusive Start Deal / Begin Match Button */}
+                <button
+                  type="button"
+                  id="btn-start-deal"
+                  onClick={onStartDeal}
+                  disabled={selfPlayer.currentBet <= 0 && selfPlayer.chips > 0}
+                  className={`px-10 py-3.5 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2.5 shadow-2xl transition-all active:scale-95 cursor-pointer ${
+                    selfPlayer.currentBet > 0 || selfPlayer.chips === 0
+                      ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-stone-950 shadow-[0_0_25px_rgba(245,158,11,0.45)] ring-2 ring-amber-300/60 animate-pulse'
+                      : 'bg-stone-800 text-stone-400 border border-white/10 opacity-50 cursor-not-allowed'
+                  }`}
+                  title="Apenas você (Criador da Sala) pode iniciar a partida e distribuir as cartas"
+                >
+                  <Crown className="w-5 h-5 fill-current text-stone-950" />
+                  <Play className="w-4 h-4 fill-current text-stone-950" />
+                  <span>👑 Iniciar Partida (Distribuir Cartas)</span>
+                </button>
+              </div>
+            ) : (
+              /* Guest player view: Can only confirm bet and wait for host */
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
+                {!selfPlayer.isReady ? (
+                  <button
+                    type="button"
+                    id="btn-confirm-bet"
+                    onClick={onReadyToggle}
+                    disabled={selfPlayer.currentBet <= 0 || selfPlayer.chips <= 0}
+                    className={`px-10 py-3.5 rounded-xl font-black uppercase tracking-wider text-xs sm:text-sm flex items-center gap-2.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
+                      selfPlayer.currentBet > 0
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 shadow-[0_0_20px_rgba(16,185,129,0.35)]'
+                        : 'bg-stone-800 text-stone-400 border border-white/10 opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>
+                      {selfPlayer.currentBet > 0
+                        ? `✓ Confirmar Aposta ($${selfPlayer.currentBet.toLocaleString()})`
+                        : 'Escolha um valor nas fichas para Jogar'}
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3 flex-wrap justify-center">
+                    <div className="px-6 py-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 font-extrabold text-xs sm:text-sm flex items-center gap-2.5 shadow-lg animate-pulse">
+                      <Crown className="w-4 h-4 text-yellow-400" />
+                      <span>✓ Aposta Confirmada (${selfPlayer.currentBet.toLocaleString()}) — Aguardando o Criador da Sala (Host) Iniciar a Partida...</span>
+                    </div>
+                    <button
+                      type="button"
+                      id="btn-modify-bet-guest"
+                      onClick={onReadyToggle}
+                      className="px-3.5 py-2 text-xs rounded-lg bg-stone-800 hover:bg-stone-700 border border-white/10 text-stone-300 font-bold transition-colors cursor-pointer"
+                    >
+                      Alterar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Bot Management Panel (Quick + / - Bots) */}

@@ -1144,7 +1144,6 @@ io.on("connection", (socket) => {
       player.isReady = !player.isReady;
       player.status = player.isReady ? "ready" : "betting";
       broadcastRoom(currentRoomId);
-      checkStartDeal(room);
     }
   });
   socket.on("game:start_deal", () => {
@@ -1152,15 +1151,11 @@ io.on("connection", (socket) => {
     const room = rooms.get(currentRoomId);
     if (!room || room.phase !== "betting") return;
     const player = room.players.find((p) => p.id === socket.id);
-    if (player && player.isHost) {
-      const seatedPlayers = room.players.filter((p) => !p.isSpectator);
-      const allReady = seatedPlayers.every((p) => p.isReady || p.chips === 0);
-      if (!allReady) {
-        socket.emit("room:error", { message: "Todos os jogadores na mesa precisam confirmar sua aposta (clicar em Pronto) para come\xE7ar!" });
-        return;
-      }
-      startGameDeal(room);
+    if (!player || !player.isHost) {
+      socket.emit("room:error", { message: "Apenas o Criador da Sala (Host) pode iniciar a partida e distribuir as cartas!" });
+      return;
     }
+    startGameDeal(room);
   });
   function startGameDeal(room) {
     const readyPlayers = room.players.filter((p) => !p.isSpectator && p.isReady && p.currentBet > 0).sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0));
