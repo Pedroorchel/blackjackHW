@@ -381,6 +381,16 @@ function generateUniqueBot(seatIndex, excludedIds = []) {
 
 // server.ts
 var app = (0, import_express.default)();
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 var httpServer = (0, import_http.createServer)(app);
 var PORT = 3e3;
 var io = new import_socket.Server(httpServer, {
@@ -398,9 +408,78 @@ function generateRoomCode() {
   }
   return code;
 }
+function initPublicRooms() {
+  const publicConfigs = [
+    { id: "ROYALE", name: "\u{1F3B0} Mesa Cassino Royale #1" },
+    { id: "VEGAS", name: "\u{1F48E} Mesa Las Vegas VIP #2" },
+    { id: "MONTE", name: "\u{1F3C6} Mesa High Rollers #3" }
+  ];
+  for (const cfg of publicConfigs) {
+    if (!rooms.has(cfg.id)) {
+      const room = {
+        roomId: cfg.id,
+        name: cfg.name,
+        isPublic: true,
+        hostId: "dealer-host",
+        phase: "betting",
+        players: [],
+        activePlayerId: null,
+        dealer: {
+          cards: [],
+          score: 0,
+          isBust: false,
+          isBlackjack: false,
+          statusText: "Fa\xE7am suas apostas na mesa"
+        },
+        shoe: createDeck(),
+        roundNumber: 1,
+        messages: [{
+          id: `sys-${Date.now()}`,
+          senderName: "Dealer VIP",
+          text: `Bem-vindo \xE0 ${cfg.name}! Esta \xE9 uma mesa p\xFAblica multiplayer ao vivo. Escolha um assento livre para jogar com outros participantes!`,
+          timestamp: Date.now(),
+          isSystem: true
+        }],
+        turnTimeout: 20
+      };
+      const bot1 = generateUniqueBot(1, []);
+      bot1.status = "ready";
+      const bot2 = generateUniqueBot(5, [bot1.id]);
+      bot2.status = "ready";
+      room.players = [bot1, bot2];
+      rooms.set(cfg.id, room);
+    }
+  }
+}
+initPublicRooms();
+function getRoomsSummary() {
+  initPublicRooms();
+  const summaries = [];
+  for (const room of rooms.values()) {
+    const seatedCount = room.players.filter((p) => !p.isSpectator).length;
+    const spectatorCount = room.players.filter((p) => p.isSpectator).length;
+    summaries.push({
+      roomId: room.roomId,
+      name: room.name || `Mesa VIP #${room.roomId}`,
+      isPublic: !!room.isPublic,
+      totalPlayers: room.players.length,
+      seatedCount,
+      spectatorCount,
+      maxSeats: 9,
+      phase: room.phase,
+      roundNumber: room.roundNumber
+    });
+  }
+  return summaries;
+}
+function broadcastRoomsList() {
+  io.emit("rooms:list", getRoomsSummary());
+}
 function getSafeRoomState(room) {
   return {
     roomId: room.roomId,
+    name: room.name,
+    isPublic: room.isPublic,
     hostId: room.hostId,
     phase: room.phase,
     players: room.players,
@@ -417,6 +496,7 @@ function broadcastRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   io.to(roomId).emit("room:state", getSafeRoomState(room));
+  broadcastRoomsList();
 }
 function drawCard(room, hidden = false) {
   if (room.shoe.length < 15) {
@@ -644,6 +724,58 @@ function startDealerTurn(room) {
     room.dealerTimer = setTimeout(runDealerDraw, 1200);
   }, 600);
 }
+function startNewRoundInternal(room) {
+  if (room.phase !== "round_over") return;
+  if (room.dealerTimer) {
+    clearTimeout(room.dealerTimer);
+    room.dealerTimer = void 0;
+  }
+  if (room.autoNextTimer) {
+    clearTimeout(room.autoNextTimer);
+    room.autoNextTimer = void 0;
+  }
+  room.phase = "betting";
+  room.roundNumber += 1;
+  room.activePlayerId = null;
+  room.dealer = {
+    cards: [],
+    score: 0,
+    isBust: false,
+    isBlackjack: false,
+    statusText: "Aguardando apostas para a nova rodada..."
+  };
+  room.players.forEach((p) => {
+    if (p.isSpectator) {
+      p.status = "spectator";
+      p.cards = [];
+      p.currentBet = 0;
+      return;
+    }
+    p.cards = [];
+    p.outcome = null;
+    p.payout = 0;
+    p.isReady = false;
+    if (p.chips <= 0) {
+      p.chips = 500;
+      room.messages.push({
+        id: `sys-${Date.now()}-${p.id}`,
+        senderName: "Mesa",
+        text: `${p.name} recebeu recarga de fichas do cassino!`,
+        timestamp: Date.now(),
+        isSystem: true
+      });
+    }
+    if (p.isBot) {
+      p.currentBet = Math.min(p.chips, [25, 50, 100][Math.floor(Math.random() * 3)]);
+      p.isReady = true;
+      p.status = "ready";
+    } else {
+      p.currentBet = Math.min(p.currentBet, p.chips);
+      p.status = "betting";
+    }
+  });
+  broadcastRoom(room.roomId);
+}
 function finishRound(room, customSummary) {
   room.phase = "round_over";
   const dealerScore = calculateHandScore(room.dealer.cards);
@@ -717,6 +849,15 @@ function finishRound(room, customSummary) {
     message: summary
   });
   broadcastRoom(room.roomId);
+  if (room.isPublic) {
+    if (room.autoNextTimer) clearTimeout(room.autoNextTimer);
+    room.autoNextTimer = setTimeout(() => {
+      const curr = rooms.get(room.roomId);
+      if (curr && curr.phase === "round_over") {
+        startNewRoundInternal(curr);
+      }
+    }, 6e3);
+  }
 }
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", activeRooms: rooms.size });
@@ -724,6 +865,25 @@ app.get("/api/health", (req, res) => {
 io.on("connection", (socket) => {
   let currentRoomId = null;
   let playerRefId = socket.id;
+  socket.emit("rooms:list", getRoomsSummary());
+  socket.on("rooms:get_list", () => {
+    socket.emit("rooms:list", getRoomsSummary());
+  });
+  socket.on("rooms:quick_play", ({ playerName, wins, chips, avatarUrl }, callback) => {
+    initPublicRooms();
+    const publicRooms = Array.from(rooms.values()).filter((r) => r.isPublic);
+    publicRooms.sort((a, b) => {
+      const aSeated = a.players.filter((p) => !p.isSpectator).length;
+      const bSeated = b.players.filter((p) => !p.isSpectator).length;
+      return bSeated - aSeated;
+    });
+    const target = publicRooms.find((r) => r.players.filter((p) => !p.isSpectator).length < 9) || publicRooms[0];
+    if (!target) {
+      callback?.({ success: false, error: "Nenhuma mesa dispon\xEDvel no momento." });
+      return;
+    }
+    joinRoomInternal(target.roomId, playerName, wins, chips, avatarUrl, callback);
+  });
   socket.on("room:create", ({ playerName, wins, chips, avatarUrl }, callback) => {
     const roomId = generateRoomCode();
     currentRoomId = roomId;
@@ -739,6 +899,8 @@ io.on("connection", (socket) => {
       isHost: true,
       isReady: false,
       seatIndex: 0,
+      // Seat 1
+      isSpectator: false,
       debts: {},
       wins: typeof wins === "number" ? wins : 0,
       avatarUrl: typeof avatarUrl === "string" ? avatarUrl : void 0
@@ -761,7 +923,7 @@ io.on("connection", (socket) => {
       messages: [{
         id: `sys-${Date.now()}`,
         senderName: "Mesa",
-        text: `Sala criada com c\xF3digo ${roomId}. Boa sorte!`,
+        text: `Mesa VIP criada com c\xF3digo ${roomId}! Compartilhe este c\xF3digo com seus amigos para jogarem juntos.`,
         timestamp: Date.now(),
         isSystem: true
       }],
@@ -772,52 +934,142 @@ io.on("connection", (socket) => {
     callback({ success: true, roomId });
     broadcastRoom(roomId);
   });
-  socket.on("room:join", ({ roomId, playerName, wins, chips, avatarUrl }, callback) => {
+  function joinRoomInternal(roomId, playerName, wins, chips, avatarUrl, callback) {
     const upperId = roomId.trim().toUpperCase();
     const room = rooms.get(upperId);
     if (!room) {
-      callback({ success: false, error: "Sala n\xE3o encontrada. Verifique o c\xF3digo digitado." });
+      callback?.({ success: false, error: "Sala n\xE3o encontrada. Verifique se o c\xF3digo est\xE1 correto e se o host continua com a mesa aberta." });
       return;
     }
-    const nonSpectators = room.players.filter((p) => !p.isSpectator);
-    const isSpectator = nonSpectators.length >= 9;
     currentRoomId = upperId;
     socket.join(upperId);
-    let availableSeat = -1;
-    if (!isSpectator) {
-      const takenSeats = new Set(nonSpectators.map((p) => p.seatIndex));
-      availableSeat = 0;
-      while (takenSeats.has(availableSeat)) {
-        availableSeat++;
+    let existing = room.players.find((p) => p.id === socket.id);
+    if (!existing) {
+      const occupiedSeats = new Set(room.players.filter((p) => !p.isSpectator).map((p) => p.seatIndex));
+      let availableSeat = -1;
+      for (let s = 0; s < 9; s++) {
+        if (!occupiedSeats.has(s)) {
+          availableSeat = s;
+          break;
+        }
+      }
+      const isSeated = availableSeat !== -1;
+      const newPlayer = {
+        id: socket.id,
+        name: playerName.trim() || `Jogador ${room.players.length + 1}`,
+        chips: typeof chips === "number" && chips > 0 ? Math.min(25e4, chips) : 500,
+        currentBet: 0,
+        cards: [],
+        status: isSeated ? room.phase === "betting" ? "betting" : "waiting" : "spectator",
+        outcome: null,
+        payout: 0,
+        isHost: room.players.filter((p) => !p.isBot).length === 0,
+        isReady: false,
+        seatIndex: availableSeat,
+        isSpectator: !isSeated,
+        debts: {},
+        wins: typeof wins === "number" ? wins : 0,
+        avatarUrl: typeof avatarUrl === "string" ? avatarUrl : void 0
+      };
+      room.players.push(newPlayer);
+      room.messages.push({
+        id: `sys-${Date.now()}`,
+        senderName: "Mesa",
+        text: isSeated ? `\u{1F389} ${newPlayer.name} entrou e sentou no Assento ${availableSeat + 1}!` : `${newPlayer.name} entrou na sala como espectador (todos os 9 assentos est\xE3o ocupados).`,
+        timestamp: Date.now(),
+        isSystem: true
+      });
+    } else {
+      existing.name = playerName.trim() || existing.name;
+      if (typeof avatarUrl === "string") existing.avatarUrl = avatarUrl;
+    }
+    callback?.({ success: true, roomId: upperId });
+    broadcastRoom(upperId);
+  }
+  socket.on("room:join", ({ roomId, playerName, wins, chips, avatarUrl }, callback) => {
+    joinRoomInternal(roomId, playerName, wins, chips, avatarUrl, callback);
+  });
+  socket.on("player:take_seat", ({ seatIndex }, callback) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    if (typeof seatIndex !== "number" || seatIndex < 0 || seatIndex >= 9) {
+      callback?.({ success: false, error: "Assento inv\xE1lido (escolha de 1 a 9)." });
+      return;
+    }
+    const occupiedIndex = room.players.findIndex((p) => !p.isSpectator && p.seatIndex === seatIndex && p.id !== socket.id);
+    if (occupiedIndex !== -1) {
+      const occupant = room.players[occupiedIndex];
+      if (occupant.isBot) {
+        occupant.isSpectator = true;
+        occupant.seatIndex = -1;
+        occupant.status = "spectator";
+        occupant.isReady = false;
+        room.messages.push({
+          id: `sys-${Date.now()}`,
+          senderName: "Mesa",
+          text: `\u{1F916} ${occupant.name} cedeu o Assento ${seatIndex + 1} para o jogador real!`,
+          timestamp: Date.now(),
+          isSystem: true
+        });
+      } else {
+        callback?.({ success: false, error: `O Assento ${seatIndex + 1} j\xE1 est\xE1 ocupado.` });
+        return;
       }
     }
-    const newPlayer = {
-      id: socket.id,
-      name: playerName.trim() || `Jogador ${room.players.length + 1}`,
-      chips: isSpectator ? 0 : typeof chips === "number" ? Math.min(25e4, chips) : 500,
-      currentBet: 0,
-      cards: [],
-      status: isSpectator ? "spectator" : room.phase === "betting" ? "betting" : "waiting",
-      outcome: null,
-      payout: 0,
-      isHost: false,
-      isReady: false,
-      seatIndex: availableSeat,
-      isSpectator,
-      debts: {},
-      wins: typeof wins === "number" ? wins : 0,
-      avatarUrl: typeof avatarUrl === "string" ? avatarUrl : void 0
-    };
-    room.players.push(newPlayer);
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+    if (player.status === "playing") {
+      callback?.({ success: false, error: "Termine a sua jogada antes de trocar de assento." });
+      return;
+    }
+    const prevSeat = player.seatIndex;
+    player.isSpectator = false;
+    player.seatIndex = seatIndex;
+    player.status = room.phase === "betting" ? "betting" : "waiting";
+    player.isReady = false;
+    player.currentBet = 0;
     room.messages.push({
       id: `sys-${Date.now()}`,
       senderName: "Mesa",
-      text: `${newPlayer.name} entrou na sala${isSpectator ? " como espectador" : ""}.`,
+      text: prevSeat >= 0 && prevSeat !== seatIndex ? `${player.name} mudou para o Assento ${seatIndex + 1}.` : `${player.name} sentou no Assento ${seatIndex + 1}!`,
       timestamp: Date.now(),
       isSystem: true
     });
-    callback({ success: true });
-    broadcastRoom(upperId);
+    callback?.({ success: true, seatIndex });
+    broadcastRoom(currentRoomId);
+    checkStartDeal(room);
+  });
+  socket.on("player:stand_up", (callback) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player || player.isSpectator) return;
+    if (player.status === "playing") {
+      callback?.({ success: false, error: "Termine sua rodada antes de se levantar." });
+      return;
+    }
+    if (room.phase === "betting" && player.currentBet > 0) {
+      player.chips += player.currentBet;
+      player.currentBet = 0;
+    }
+    const prevSeat = player.seatIndex;
+    player.isSpectator = true;
+    player.seatIndex = -1;
+    player.status = "spectator";
+    player.isReady = false;
+    player.cards = [];
+    room.messages.push({
+      id: `sys-${Date.now()}`,
+      senderName: "Mesa",
+      text: `${player.name} levantou do Assento ${prevSeat + 1} e agora est\xE1 assistindo como espectador.`,
+      timestamp: Date.now(),
+      isSystem: true
+    });
+    callback?.({ success: true });
+    broadcastRoom(currentRoomId);
+    checkStartDeal(room);
   });
   socket.on("player:update_name", ({ name }) => {
     if (!currentRoomId) return;
@@ -1053,36 +1305,12 @@ io.on("connection", (socket) => {
     const room = rooms.get(currentRoomId);
     if (!room || room.phase !== "round_over") return;
     const player = room.players.find((p) => p.id === socket.id);
-    if (!player || !player.isHost) {
+    if (!player) return;
+    if (!room.isPublic && !player.isHost) {
       socket.emit("room:error", { message: "Apenas o Criador da Sala pode iniciar a nova rodada!" });
       return;
     }
-    if (room.dealerTimer) {
-      clearTimeout(room.dealerTimer);
-    }
-    room.phase = "betting";
-    room.roundNumber += 1;
-    room.activePlayerId = null;
-    room.dealer = {
-      cards: [],
-      score: 0,
-      isBust: false,
-      isBlackjack: false,
-      statusText: "Aguardando apostas para a nova rodada..."
-    };
-    room.players.forEach((p) => {
-      if (p.isSpectator) {
-        p.status = "spectator";
-        return;
-      }
-      p.cards = [];
-      p.outcome = null;
-      p.payout = 0;
-      p.isReady = false;
-      p.currentBet = Math.min(p.currentBet, p.chips);
-      p.status = "betting";
-    });
-    broadcastRoom(currentRoomId);
+    startNewRoundInternal(room);
   });
   socket.on("loan:request", ({ targetPlayerId, amount }) => {
     if (!currentRoomId) return;
@@ -1209,15 +1437,17 @@ io.on("connection", (socket) => {
     }
   });
   function addBotToServerRoom(room) {
-    if (room.players.length >= 9) return;
-    const takenSeats = new Set(room.players.map((p) => p.seatIndex));
-    let availableSeat = 1;
-    for (let s = 1; s <= 8; s++) {
+    const seatedCount = room.players.filter((p) => !p.isSpectator).length;
+    if (seatedCount >= 9) return;
+    const takenSeats = new Set(room.players.filter((p) => !p.isSpectator).map((p) => p.seatIndex));
+    let availableSeat = -1;
+    for (let s = 0; s < 9; s++) {
       if (!takenSeats.has(s)) {
         availableSeat = s;
         break;
       }
     }
+    if (availableSeat === -1) return;
     const excludedIds = room.players.map((p) => p.id);
     const newBot = generateUniqueBot(availableSeat, excludedIds);
     newBot.status = room.phase === "betting" ? "ready" : "waiting";
@@ -1297,10 +1527,24 @@ io.on("connection", (socket) => {
         isSystem: true
       });
     }
-    if (room.players.length === 0 || room.players.every((p) => p.isBot)) {
-      if (room.dealerTimer) clearTimeout(room.dealerTimer);
-      clearTurnTimer(room);
-      rooms.delete(currentRoomId);
+    if (room.isPublic) {
+      if (wasActive && room.phase === "player_turns") {
+        advanceTurn(room);
+      }
+      broadcastRoom(currentRoomId);
+      broadcastRoomsList();
+    } else if (room.players.length === 0 || room.players.every((p) => p.isBot)) {
+      const closingRoomId = currentRoomId;
+      setTimeout(() => {
+        const checkRoom = rooms.get(closingRoomId);
+        if (checkRoom && (checkRoom.players.length === 0 || checkRoom.players.every((p) => p.isBot))) {
+          if (checkRoom.dealerTimer) clearTimeout(checkRoom.dealerTimer);
+          clearTurnTimer(checkRoom);
+          rooms.delete(closingRoomId);
+          broadcastRoomsList();
+        }
+      }, 45e3);
+      broadcastRoomsList();
     } else {
       if (room.hostId === socket.id) {
         const nextRealPlayer = room.players.find((p) => !p.isBot);
@@ -1313,6 +1557,7 @@ io.on("connection", (socket) => {
         advanceTurn(room);
       }
       broadcastRoom(currentRoomId);
+      broadcastRoomsList();
     }
     socket.leave(currentRoomId);
     currentRoomId = null;
