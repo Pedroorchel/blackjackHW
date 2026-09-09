@@ -844,23 +844,18 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected(4000);
-    if (isConnected && socket && socket.connected) {
+    // Open local VIP table instantly with zero delay
+    isLocalModeRef.current = true;
+    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    setIsConnecting(false);
+
+    // Try socket sync in background if socket server is available
+    if (socket && socket.connected) {
       socket.emit('room:create', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
-        setIsConnecting(false);
-        if (res && res.success) {
+        if (res && res.success && res.roomId) {
           isLocalModeRef.current = false;
-        } else {
-          console.warn('Server room creation error, falling back to local VIP table:', res?.error);
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
         }
       });
-    } else {
-      console.warn('Socket offline/unreachable, opening local VIP table instantly');
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
-      setIsConnecting(false);
     }
   };
 
@@ -932,23 +927,18 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected(4000);
-    if (isConnected && socket && socket.connected) {
+    // Open local room instantly with zero delay
+    isLocalModeRef.current = true;
+    localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
+    setIsConnecting(false);
+
+    // Try socket join in background
+    if (socket && socket.connected) {
       socket.emit('room:join', { roomId: cleanRoomId, playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; error?: string }) => {
-        setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
-        } else {
-          console.warn('Server room join failed, falling back to local room');
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
         }
       });
-    } else {
-      console.warn('Socket offline, opening local room with code:', cleanRoomId);
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, cleanRoomId, 3);
-      setIsConnecting(false);
     }
   };
 
@@ -967,23 +957,17 @@ export default function App() {
       console.warn('Playtime room sync:', e);
     }
 
-    const isConnected = await ensureSocketConnected(4000);
-    if (isConnected && socket && socket.connected) {
+    // Open local table instantly with zero delay
+    isLocalModeRef.current = true;
+    localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
+    setIsConnecting(false);
+
+    if (socket && socket.connected) {
       socket.emit('rooms:quick_play', { playerName: name, wins, chips, avatarUrl }, (res: { success: boolean; roomId?: string; error?: string }) => {
-        setIsConnecting(false);
         if (res && res.success) {
           isLocalModeRef.current = false;
-        } else {
-          console.warn('Server quick play failed, starting local table');
-          isLocalModeRef.current = true;
-          localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
         }
       });
-    } else {
-      console.warn('Socket offline for quick play, starting local table');
-      isLocalModeRef.current = true;
-      localGameEngine.createRoom(name, wins, chips, avatarUrl, undefined, 3);
-      setIsConnecting(false);
     }
   };
 
