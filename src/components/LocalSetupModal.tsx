@@ -106,6 +106,14 @@ export const LocalSetupModal: React.FC<LocalSetupModalProps> = ({
             </span>
           </div>
 
+          {!isServerConnected && (
+            <div className="mb-4 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 leading-relaxed">
+              <span className="font-bold block mb-1">💡 Dica para o Google AI Studio:</span>
+              Se o status estiver <strong className="text-amber-400">Reconectando</strong> no visualizador integrado, é porque o navegador bloqueia cookies de terceiros no iframe. 
+              Clique no botão <strong className="text-white">"Open in new tab"</strong> (Abrir em nova aba) no canto superior direito para liberar a conexão multiplayer instantaneamente!
+            </div>
+          )}
+
           <form onSubmit={handleSaveServer} className="space-y-3">
             <div>
               <label className="block text-[10px] uppercase font-bold text-stone-400 mb-1">

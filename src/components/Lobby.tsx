@@ -759,7 +759,14 @@ export const Lobby: React.FC<LobbyProps> = ({
             {/* Error Message banner */}
             {(errorMessage || localError) && (
               <div className="mb-6 p-4 bg-red-950/50 border border-red-500/30 rounded-xl text-red-200 text-sm text-center font-medium animate-shake">
-                {errorMessage || localError}
+                <div>{errorMessage || localError}</div>
+                {(errorMessage || localError)?.includes('Não foi possível conectar ao servidor') && (
+                  <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200 leading-relaxed max-w-2xl mx-auto text-left">
+                    <span className="font-bold block text-amber-400 mb-1">💡 Dica para o Google AI Studio:</span>
+                    O visualizador integrado do AI Studio (iframe) bloqueia cookies de terceiros por padrão, impedindo a conexão multiplayer.
+                    Para jogar multiplayer, basta clicar em <strong className="text-white">"Open in new tab"</strong> (Abrir em nova aba) no canto superior direito do visualizador para liberar a conexão em tempo real!
+                  </div>
+                )}
               </div>
             )}
 

@@ -271,7 +271,8 @@ export default function App() {
                          window.location.hostname.includes('pages.dev');
 
     if (isStaticHost) {
-      return 'https://ais-dev-jmdx2zcehkmkehmm7m4erp-791084157184.us-east1.run.app';
+      // Use the public shared production container URL so friends can play without needing AI Studio login credentials
+      return 'https://ais-pre-jmdx2zcehkmkehmm7m4erp-791084157184.us-east1.run.app';
     }
 
     // Always default to current window origin instead of returning undefined,
