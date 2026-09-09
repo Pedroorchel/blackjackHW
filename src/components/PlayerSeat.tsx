@@ -37,28 +37,37 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(player.name);
 
-  const [timeLeft, setTimeLeft] = useState(15);
+  const [timeLeft, setTimeLeft] = useState(turnTimeout);
 
   useEffect(() => {
     if (!isActiveTurn) {
-      setTimeLeft(15);
+      setTimeLeft(turnTimeout);
       return;
     }
 
-    setTimeLeft(15);
+    const calculateRemaining = () => {
+      if (turnStartTime) {
+        const elapsed = Math.floor((Date.now() - turnStartTime) / 1000);
+        return Math.max(0, turnTimeout - elapsed);
+      }
+      return turnTimeout;
+    };
+
+    setTimeLeft(calculateRemaining());
 
     const interval = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) {
+        const remaining = turnStartTime ? calculateRemaining() : prev - 1;
+        if (remaining <= 0) {
           clearInterval(interval);
           return 0;
         }
-        return prev - 1;
+        return remaining;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isActiveTurn, turnStartTime]);
+  }, [isActiveTurn, turnStartTime, turnTimeout]);
 
   const handScore = calculateHandScore(player.cards);
   

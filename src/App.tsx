@@ -110,6 +110,12 @@ export default function App() {
   totalPlaytimeRef.current = totalPlaytimeSeconds;
   const sessionSecondsRef = useRef(sessionSeconds);
   sessionSecondsRef.current = sessionSeconds;
+  const todaySecondsRef = useRef(todaySeconds);
+  todaySecondsRef.current = todaySeconds;
+  const longestSessionSecondsRef = useRef(longestSessionSeconds);
+  longestSessionSecondsRef.current = longestSessionSeconds;
+  const roomStateRef = useRef(roomState);
+  roomStateRef.current = roomState;
 
   // Reconcile playtime with database on mount and on auth state change
   useEffect(() => {
@@ -141,8 +147,12 @@ export default function App() {
         const res = await fetchAndSyncPlaytimeFromDatabase(uid);
         if (res) {
           setTotalPlaytimeSeconds(res.totalSeconds);
+          totalPlaytimeRef.current = res.totalSeconds;
           setLongestSessionSeconds(res.longestSessionSeconds);
-          setTodaySeconds(getStoredTodayPlaytime(uid));
+          longestSessionSecondsRef.current = res.longestSessionSeconds;
+          const tDay = getStoredTodayPlaytime(uid);
+          setTodaySeconds(tDay);
+          todaySecondsRef.current = tDay;
         }
       } else {
         const guestId = getActiveAccountId();
@@ -172,8 +182,12 @@ export default function App() {
     fetchAndSyncPlaytimeFromDatabase().then(res => {
       if (res) {
         setTotalPlaytimeSeconds(res.totalSeconds);
+        totalPlaytimeRef.current = res.totalSeconds;
         setLongestSessionSeconds(res.longestSessionSeconds);
-        setTodaySeconds(getStoredTodayPlaytime());
+        longestSessionSecondsRef.current = res.longestSessionSeconds;
+        const tDay = getStoredTodayPlaytime();
+        setTodaySeconds(tDay);
+        todaySecondsRef.current = tDay;
       }
     });
 
@@ -192,48 +206,93 @@ export default function App() {
     };
   }, []);
 
-  // Count playtime while actively in game/room
+  // Continuous global playtime timer that runs whenever the app is open
   useEffect(() => {
-    if (!roomState) {
-      setSessionSeconds(0);
-      return;
-    }
-
     const interval = setInterval(() => {
-      setSessionSeconds(prev => prev + 1);
-      setTotalPlaytimeSeconds(prev => prev + 1);
-      setTodaySeconds(prev => prev + 1);
+      setTotalPlaytimeSeconds(prev => {
+        const next = prev + 1;
+        totalPlaytimeRef.current = next;
+        return next;
+      });
+      setTodaySeconds(prev => {
+        const next = prev + 1;
+        todaySecondsRef.current = next;
+        return next;
+      });
+
+      // If user is inside a room table, tick table session
+      if (roomStateRef.current) {
+        setSessionSeconds(prev => {
+          const next = prev + 1;
+          sessionSecondsRef.current = next;
+          setLongestSessionSeconds(oldLongest => {
+            if (next > oldLongest) {
+              longestSessionSecondsRef.current = next;
+              return next;
+            }
+            return oldLongest;
+          });
+          return next;
+        });
+      }
     }, 1000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Reset table session counter when leaving table
+  useEffect(() => {
+    if (!roomState) {
+      setSessionSeconds(0);
+      sessionSecondsRef.current = 0;
+    }
   }, [roomState !== null]);
 
   // Persist playtime automatically to localStorage and database
   useEffect(() => {
-    if (!roomState || sessionSeconds === 0) return;
-    
-    // Save to local storage every 2 seconds
-    if (sessionSeconds % 2 === 0) {
-      persistPlaytime(totalPlaytimeSeconds, sessionSeconds);
-    }
+    const saveInterval = setInterval(() => {
+      persistPlaytime(
+        totalPlaytimeRef.current,
+        sessionSecondsRef.current,
+        currentUserIdRef.current,
+        todaySecondsRef.current
+      );
+    }, 3000);
 
-    // Save to Supabase database every 10 seconds
-    if (sessionSeconds % 10 === 0) {
-      syncPlaytimeToDatabase(totalPlaytimeSeconds, sessionSeconds);
-    }
-  }, [sessionSeconds, totalPlaytimeSeconds, roomState]);
+    const dbSyncInterval = setInterval(() => {
+      syncPlaytimeToDatabase(
+        totalPlaytimeRef.current,
+        sessionSecondsRef.current,
+        false,
+        currentUserIdRef.current
+      );
+    }, 15000);
+
+    return () => {
+      clearInterval(saveInterval);
+      clearInterval(dbSyncInterval);
+    };
+  }, []);
 
   // Ensure playtime is saved when user navigates away or closes tab
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (sessionSeconds > 0) {
-        persistPlaytime(totalPlaytimeSeconds, sessionSeconds);
-        syncPlaytimeToDatabase(totalPlaytimeSeconds, sessionSeconds, true);
-      }
+      persistPlaytime(
+        totalPlaytimeRef.current,
+        sessionSecondsRef.current,
+        currentUserIdRef.current,
+        todaySecondsRef.current
+      );
+      syncPlaytimeToDatabase(
+        totalPlaytimeRef.current,
+        sessionSecondsRef.current,
+        true,
+        currentUserIdRef.current
+      );
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [sessionSeconds, totalPlaytimeSeconds]);
+  }, []);
 
   useEffect(() => {
     if (!roomState || roomState.phase !== 'player_turns' || !roomState.activePlayerId) {
@@ -1259,6 +1318,10 @@ export default function App() {
           isServerConnected={isServerConnected}
           customServerUrl={customServerUrl}
           onSaveServerUrl={handleSaveServerUrl}
+          totalPlaytimeSeconds={totalPlaytimeSeconds}
+          sessionSeconds={sessionSeconds}
+          todaySeconds={todaySeconds}
+          longestSessionSeconds={longestSessionSeconds}
         />
         <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
         <LocalSetupModal 

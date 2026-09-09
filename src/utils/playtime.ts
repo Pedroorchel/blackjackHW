@@ -167,7 +167,12 @@ export function getStoredTodayPlaytime(userId?: string): number {
 /**
  * Save total, longest, and today's playtime (isolated by account)
  */
-export function persistPlaytime(totalSeconds: number, sessionSeconds: number, userId?: string) {
+export function persistPlaytime(
+  totalSeconds: number, 
+  sessionSeconds: number, 
+  userId?: string,
+  todaySeconds?: number
+) {
   if (typeof window === 'undefined') return;
   try {
     const totalKey = getUserStorageKey(STORAGE_KEYS.TOTAL_PLAYTIME, userId);
@@ -180,9 +185,10 @@ export function persistPlaytime(totalSeconds: number, sessionSeconds: number, us
 
     // Record longest session
     const currentLongest = getStoredLongestSession(userId);
-    if (sessionSeconds > currentLongest) {
-      localStorage.setItem(longestKey, sessionSeconds.toString());
-      localStorage.setItem(STORAGE_KEYS.LONGEST_SESSION, sessionSeconds.toString());
+    const newLongest = Math.max(currentLongest, sessionSeconds);
+    if (newLongest > 0) {
+      localStorage.setItem(longestKey, newLongest.toString());
+      localStorage.setItem(STORAGE_KEYS.LONGEST_SESSION, newLongest.toString());
     }
 
     // Record first played timestamp if not set
@@ -194,13 +200,15 @@ export function persistPlaytime(totalSeconds: number, sessionSeconds: number, us
     // Update today's time
     const todayStr = new Date().toISOString().slice(0, 10);
     const savedDate = localStorage.getItem(todayDateKey);
-    let todaySecs = 0;
-    if (savedDate === todayStr) {
-      todaySecs = parseInt(localStorage.getItem(todayKey) || '0', 10) + 1;
-    } else {
-      todaySecs = 1;
+    let todaySecs = typeof todaySeconds === 'number' ? todaySeconds : 0;
+    
+    if (savedDate !== todayStr) {
       localStorage.setItem(todayDateKey, todayStr);
+      todaySecs = typeof todaySeconds === 'number' ? todaySeconds : 1;
+    } else if (typeof todaySeconds !== 'number') {
+      todaySecs = parseInt(localStorage.getItem(todayKey) || '0', 10);
     }
+    
     localStorage.setItem(todayKey, todaySecs.toString());
 
     // Update guest profile in localStorage if playing as guest

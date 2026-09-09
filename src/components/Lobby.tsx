@@ -57,6 +57,10 @@ interface LobbyProps {
   isServerConnected?: boolean;
   customServerUrl?: string;
   onSaveServerUrl?: (url: string) => void;
+  totalPlaytimeSeconds?: number;
+  sessionSeconds?: number;
+  todaySeconds?: number;
+  longestSessionSeconds?: number;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -72,7 +76,11 @@ export const Lobby: React.FC<LobbyProps> = ({
   onPlaytimeSync,
   isServerConnected = false,
   customServerUrl = '',
-  onSaveServerUrl
+  onSaveServerUrl,
+  totalPlaytimeSeconds,
+  sessionSeconds = 0,
+  todaySeconds,
+  longestSessionSeconds
 }) => {
   const [name, setName] = useState(playerName);
   const [email, setEmail] = useState('');
@@ -98,6 +106,11 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [totalPlaytime, setTotalPlaytime] = useState(() => getStoredTotalPlaytime());
   const [todayPlaytime, setTodayPlaytime] = useState(() => getStoredTodayPlaytime());
   const [longestSession, setLongestSession] = useState(() => getStoredLongestSession());
+
+  const currentTotalPlaytime = typeof totalPlaytimeSeconds === 'number' ? totalPlaytimeSeconds : totalPlaytime;
+  const currentTodayPlaytime = typeof todaySeconds === 'number' ? todaySeconds : todayPlaytime;
+  const currentLongestSession = typeof longestSessionSeconds === 'number' ? longestSessionSeconds : longestSession;
+  const currentSessionSeconds = typeof sessionSeconds === 'number' ? sessionSeconds : 0;
 
   useEffect(() => {
     const uid = userProfile?.id;
@@ -717,7 +730,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <Clock className="w-2.5 h-2.5 text-amber-400" /> Tempo de Jogo
                   </p>
                   <p className="text-base sm:text-xl font-black text-amber-400 font-mono group-hover:text-amber-300 flex items-center justify-center md:justify-end gap-1.5 transition-colors">
-                    {formatPlaytimeBadge(totalPlaytime)}
+                    {formatPlaytimeBadge(currentTotalPlaytime)}
                     <span className="text-[9px] font-sans font-black uppercase px-1.5 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded">
                       Placar
                     </span>
@@ -1287,7 +1300,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           }}
           onClose={() => setIsEditingProfile(false)}
           isSelf={true}
-          playtimeSeconds={totalPlaytime}
+          playtimeSeconds={currentTotalPlaytime}
           onOpenPlaytimeScoreboard={() => {
             setIsEditingProfile(false);
             setIsPlaytimeOpen(true);
@@ -1313,8 +1326,8 @@ export const Lobby: React.FC<LobbyProps> = ({
         bankrollHistory={bankrollHistory}
         currentChips={chipsCount}
         currentRound={handHistory.length}
-        sessionSeconds={0}
-        totalSeconds={totalPlaytime}
+        sessionSeconds={currentSessionSeconds}
+        totalSeconds={currentTotalPlaytime}
         playerName={name}
         accountType={userProfile ? 'Conta Cadastrada' : 'Conta Convidado'}
         isLobbyView={true}
@@ -1336,10 +1349,10 @@ export const Lobby: React.FC<LobbyProps> = ({
       <PlaytimeScoreboardModal
         isOpen={isPlaytimeOpen}
         onClose={() => setIsPlaytimeOpen(false)}
-        sessionSeconds={0}
-        totalSeconds={totalPlaytime}
-        todaySeconds={todayPlaytime}
-        longestSessionSeconds={longestSession}
+        sessionSeconds={currentSessionSeconds}
+        totalSeconds={currentTotalPlaytime}
+        todaySeconds={currentTodayPlaytime}
+        longestSessionSeconds={currentLongestSession}
         isInGame={false}
       />
     </div>
